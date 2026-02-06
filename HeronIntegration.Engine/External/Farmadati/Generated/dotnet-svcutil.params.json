@@ -1,0 +1,55 @@
+{
+  "providerId": "Microsoft.Tools.ServiceModel.Svcutil",
+  "version": "8.0.0",
+  "options": {
+    "inputs": [
+      "http://webservices-farmadati.dyndns.ws/WS2/FarmadatiItaliaWebServicesM1.svc?singleWsdl"
+    ],
+    "namespaceMappings": [
+      "*, HeronIntegration.Engine.External.Farmadati.Generated"
+    ],
+    "outputFile": "Reference.cs",
+    "references": [
+      "DnsClient, {DnsClient, 1.6.1}",
+      "Microsoft.Extensions.Configuration, {Microsoft.Extensions.Configuration, 9.0.12}",
+      "Microsoft.Extensions.Configuration.Abstractions, {Microsoft.Extensions.Configuration.Abstractions, 9.0.12}",
+      "Microsoft.Extensions.Configuration.Binder, {Microsoft.Extensions.Configuration.Binder, 9.0.12}",
+      "Microsoft.Extensions.Configuration.CommandLine, {Microsoft.Extensions.Configuration.CommandLine, 9.0.12}",
+      "Microsoft.Extensions.Configuration.EnvironmentVariables, {Microsoft.Extensions.Configuration.EnvironmentVariables, 9.0.12}",
+      "Microsoft.Extensions.Configuration.FileExtensions, {Microsoft.Extensions.Configuration.FileExtensions, 9.0.12}",
+      "Microsoft.Extensions.Configuration.Json, {Microsoft.Extensions.Configuration.Json, 9.0.12}",
+      "Microsoft.Extensions.Configuration.UserSecrets, {Microsoft.Extensions.Configuration.UserSecrets, 9.0.12}",
+      "Microsoft.Extensions.DependencyInjection, {Microsoft.Extensions.DependencyInjection, 9.0.12}",
+      "Microsoft.Extensions.DependencyInjection.Abstractions, {Microsoft.Extensions.DependencyInjection.Abstractions, 9.0.12}",
+      "Microsoft.Extensions.Diagnostics, {Microsoft.Extensions.Diagnostics, 9.0.12}",
+      "Microsoft.Extensions.Diagnostics.Abstractions, {Microsoft.Extensions.Diagnostics.Abstractions, 9.0.12}",
+      "Microsoft.Extensions.FileProviders.Abstractions, {Microsoft.Extensions.FileProviders.Abstractions, 9.0.12}",
+      "Microsoft.Extensions.FileProviders.Physical, {Microsoft.Extensions.FileProviders.Physical, 9.0.12}",
+      "Microsoft.Extensions.FileSystemGlobbing, {Microsoft.Extensions.FileSystemGlobbing, 9.0.12}",
+      "Microsoft.Extensions.Hosting, {Microsoft.Extensions.Hosting, 9.0.12}",
+      "Microsoft.Extensions.Hosting.Abstractions, {Microsoft.Extensions.Hosting.Abstractions, 9.0.12}",
+      "Microsoft.Extensions.Logging, {Microsoft.Extensions.Logging, 9.0.12}",
+      "Microsoft.Extensions.Logging.Abstractions, {Microsoft.Extensions.Logging.Abstractions, 9.0.12}",
+      "Microsoft.Extensions.Logging.Configuration, {Microsoft.Extensions.Logging.Configuration, 9.0.12}",
+      "Microsoft.Extensions.Logging.Console, {Microsoft.Extensions.Logging.Console, 9.0.12}",
+      "Microsoft.Extensions.Logging.Debug, {Microsoft.Extensions.Logging.Debug, 9.0.12}",
+      "Microsoft.Extensions.Logging.EventLog, {Microsoft.Extensions.Logging.EventLog, 9.0.12}",
+      "Microsoft.Extensions.Logging.EventSource, {Microsoft.Extensions.Logging.EventSource, 9.0.12}",
+      "Microsoft.Extensions.Options, {Microsoft.Extensions.Options, 9.0.12}",
+      "Microsoft.Extensions.Options.ConfigurationExtensions, {Microsoft.Extensions.Options.ConfigurationExtensions, 9.0.12}",
+      "Microsoft.Extensions.Primitives, {Microsoft.Extensions.Primitives, 9.0.12}",
+      "Microsoft.Win32.Registry, {Microsoft.Win32.Registry, 5.0.0}",
+      "MongoDB.Bson, {MongoDB.Bson, 3.6.0}",
+      "MongoDB.Driver, {MongoDB.Driver, 3.6.0}",
+      "SharpCompress, {SharpCompress, 0.30.1}",
+      "Snappier, {Snappier, 1.0.0}",
+      "System.Diagnostics.EventLog, {System.Diagnostics.EventLog, 9.0.12}",
+      "System.Runtime.CompilerServices.Unsafe, {System.Runtime.CompilerServices.Unsafe, 5.0.0}",
+      "System.Security.AccessControl, {System.Security.AccessControl, 5.0.0}",
+      "System.Security.Principal.Windows, {System.Security.Principal.Windows, 5.0.0}",
+      "ZstdSharp, {ZstdSharp.Port, 0.7.3}"
+    ],
+    "targetFramework": "net9.0",
+    "typeReuseMode": "All"
+  }
+}
