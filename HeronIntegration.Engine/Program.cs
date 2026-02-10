@@ -17,30 +17,63 @@ builder.Services.AddScoped<IBatchRepository, BatchRepository>();
 
 builder.Services.AddHostedService<BatchOrchestratorWorker>();
 
+
 builder.Services.AddHostedService<HeronFileWatcherWorker>();
-
-builder.Services.AddScoped<IStepProcessor, HeronImportStepProcessor>();
-
-builder.Services.AddScoped<IStepProcessor, FarmadatiEnrichmentStepProcessor>();
 
 builder.Services.AddScoped<IRawProductRepository, RawProductRepository>();
 
 builder.Services.AddScoped<IEnrichedProductRepository, EnrichedProductRepository>();
 
-// BASE INFO
-builder.Services.AddScoped<IProductBaseInfoProvider, FarmadatiProductBaseInfoProvider_TE001>();
-builder.Services.AddScoped<IProductBaseInfoProvider, FarmadatiProductBaseInfoProvider_TE006>();
-builder.Services.AddScoped<IProductBaseInfoProvider, CompositeProductBaseInfoProvider>();
 
-// LONG DESCRIPTION
-builder.Services.AddScoped<IProductLongDescriptionProvider, FarmadatiLongDescriptionProvider_TR039>();
-builder.Services.AddScoped<IProductLongDescriptionProvider, FarmadatiLongDescriptionProvider_TE008>();
-builder.Services.AddScoped<IProductLongDescriptionProvider, CompositeLongDescriptionProvider>();
+builder.Services.AddScoped<FarmadatiSoapClient>();
 
-// IMMAGINI
-builder.Services.AddScoped<IProductImageProvider, FarmadatiImageProvider_TE004>();
-builder.Services.AddScoped<IProductImageProvider, FarmadatiImageProvider_TE009>();
-builder.Services.AddScoped<IProductImageProvider, CompositeProductImageProvider>();
+// Farmadati providers
+builder.Services.AddScoped<FarmadatiProductBaseInfoProvider>();
+builder.Services.AddScoped<FarmadatiProductBaseInfoProvider_TE001>();
+builder.Services.AddScoped<FarmadatiProductBaseInfoProvider_TE006>();
+builder.Services.AddScoped<IProductBaseInfoProvider>(sp =>
+{
+    var providers = new IProductBaseInfoProvider[]
+    {
+        sp.GetRequiredService<FarmadatiProductBaseInfoProvider>(),
+        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE001>(),
+        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE006>()
+    };
+
+    return new CompositeProductBaseInfoProvider(providers);
+});
+
+builder.Services.AddScoped<FarmadatiLongDescriptionProvider_TE003>();
+builder.Services.AddScoped<FarmadatiLongDescriptionProvider_TE008>();
+builder.Services.AddScoped<FarmadatiLongDescriptionProvider_TE010>();
+builder.Services.AddScoped<FarmadatiLongDescriptionProvider_TR039>();
+
+builder.Services.AddScoped<IProductLongDescriptionProvider>(sp =>
+{
+    var providers = new IProductLongDescriptionProvider[]
+    {
+        sp.GetRequiredService<FarmadatiLongDescriptionProvider_TE003>(),
+        sp.GetRequiredService<FarmadatiLongDescriptionProvider_TE008>(),
+        sp.GetRequiredService<FarmadatiLongDescriptionProvider_TE010>(),
+        sp.GetRequiredService<FarmadatiLongDescriptionProvider_TR039>()
+    };
+
+    return new CompositeLongDescriptionProvider(providers);
+});
+
+builder.Services.AddScoped<FarmadatiImageProvider_TE004>();
+builder.Services.AddScoped<FarmadatiImageProvider_TE009>();
+builder.Services.AddScoped<IProductImageProvider>(sp =>
+{
+    var providers = new IProductImageProvider[]
+    {
+        sp.GetRequiredService<FarmadatiImageProvider_TE004>(),
+        sp.GetRequiredService<FarmadatiImageProvider_TE009>()
+    };
+
+    return new CompositeProductImageProvider(providers);
+});
+
 
 builder.Services.AddScoped<IProductEnrichmentService, ProductEnrichmentService>();
 
@@ -51,6 +84,10 @@ builder.Services.AddScoped<ISupplierStockRepository, SupplierStockRepository>();
 builder.Services.AddHostedService<SupplierFileImporterWorker>();
 
 builder.Services.AddHttpClient<IMagentoExporter, MagentoExporter>();
+
+builder.Services.AddScoped<IStepProcessor, HeronImportStepProcessor>();
+builder.Services.AddScoped<IStepProcessor, FarmadatiEnrichmentStepProcessor>();
+builder.Services.AddScoped<IStepProcessor, SupplierResolutionStepProcessor>();
 builder.Services.AddScoped<IStepProcessor, MagentoExportStepProcessor>();
 
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();

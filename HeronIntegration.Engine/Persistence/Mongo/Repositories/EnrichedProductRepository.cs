@@ -36,4 +36,15 @@ public class EnrichedProductRepository : IEnrichedProductRepository
             .Find(x => x.BatchId == ObjectId.Parse(batchId))
             .ToListAsync();
     }
+    public async Task<bool> ExistsAsync(string batchId, string aic)
+    {
+        var filter = Builders<EnrichedProduct>.Filter.And(
+            Builders<EnrichedProduct>.Filter.Eq(e => e.BatchId, ObjectId.Parse(batchId)),
+            Builders<EnrichedProduct>.Filter.Eq(e => e.Aic, aic)
+        );
+
+        return await _context.EnrichedProducts
+            .Find(filter)
+            .AnyAsync();
+    }
 }

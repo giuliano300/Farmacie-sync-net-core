@@ -69,4 +69,27 @@ public class ExportRepository : IExportRepository
                 x.Aic == aic)
             .AnyAsync();
     }
+
+    public async Task ResetSingleAsync(string batchId, string aic)
+    {
+        await _context.ExportExecutions.UpdateOneAsync(
+            x => x.BatchId == ObjectId.Parse(batchId) && x.Aic == aic,
+            Builders<ExportExecution>.Update
+                .Set(x => x.Status, ExportStatus.Pending)
+                .Set(x => x.AttemptCount, 0)
+                .Set(x => x.ErrorMessage, null)
+        );
+    }
+
+    public async Task ResetBatchAsync(string batchId)
+    {
+        await _context.ExportExecutions.UpdateManyAsync(
+            x => x.BatchId == ObjectId.Parse(batchId),
+            Builders<ExportExecution>.Update
+                .Set(x => x.Status, ExportStatus.Pending)
+                .Set(x => x.AttemptCount, 0)
+                .Set(x => x.ErrorMessage, null)
+        );
+    }
+
 }

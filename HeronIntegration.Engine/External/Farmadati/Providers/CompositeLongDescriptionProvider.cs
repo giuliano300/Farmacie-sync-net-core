@@ -5,10 +5,10 @@ namespace HeronSync.Infrastructure.Farmadati.Providers;
 
 public class CompositeLongDescriptionProvider : IProductLongDescriptionProvider
 {
-    private readonly IReadOnlyList<IProductLongDescriptionProvider> _providers;
+    private readonly IEnumerable<IProductLongDescriptionProvider> _providers;
 
     public CompositeLongDescriptionProvider(
-        IReadOnlyList<IProductLongDescriptionProvider> providers)
+        IEnumerable<IProductLongDescriptionProvider> providers)
     {
         _providers = providers;
     }

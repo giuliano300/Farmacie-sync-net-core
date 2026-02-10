@@ -45,11 +45,12 @@ public class StepRepository : IStepRepository
             update);
     }
 
-    public async Task SetSuccessAsync(string id)
+    public async Task SetSuccessAsync(string id, DateTime? StartedAt, DateTime? EndedAt)
     {
         var update = Builders<StepExecution>.Update
             .Set(x => x.Status, StepStatus.Success)
-            .Set(x => x.EndedAt, DateTime.UtcNow);
+            .Set(a => a.StartedAt, StartedAt)
+            .Set(x => x.EndedAt, EndedAt);
 
         await _context.StepExecutions.UpdateOneAsync(
             x => x.Id == ObjectId.Parse(id),
@@ -78,16 +79,16 @@ public class StepRepository : IStepRepository
             .FirstOrDefaultAsync();
     }
 
-    public async Task CreateDefaultStepsAsync(string batchId)
+    public async Task CreateDefaultStepsAsync(string batchId, string customerId)
     {
         var id = ObjectId.Parse(batchId);
 
         var steps = new List<StepExecution>
     {
-        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, Step = "HeronImport", Status = StepStatus.Pending },
-        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, Step = "Farmadati", Status = StepStatus.Pending },
-        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, Step = "Suppliers", Status = StepStatus.Pending },
-        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, Step = "Magento", Status = StepStatus.Pending }
+        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, CustomerId = customerId, Step = "HeronImport", Status = StepStatus.Pending },
+        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, CustomerId = customerId, Step = "Farmadati", Status = StepStatus.Pending },
+        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, CustomerId = customerId, Step = "Suppliers", Status = StepStatus.Pending },
+        new StepExecution { Id = ObjectId.GenerateNewId(), BatchId = id, CustomerId = customerId, Step = "Magento", Status = StepStatus.Pending }
     };
 
         await _context.StepExecutions.InsertManyAsync(steps);

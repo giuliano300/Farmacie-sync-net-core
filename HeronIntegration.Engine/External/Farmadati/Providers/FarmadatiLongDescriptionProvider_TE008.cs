@@ -37,7 +37,7 @@ public class FarmadatiLongDescriptionProvider_TE008 : IProductLongDescriptionPro
             pageSize: 1
         );
 
-        if (string.IsNullOrWhiteSpace(result.OutputValue))
+        if (string.IsNullOrWhiteSpace(result.OutputValue) || result.OutputValue == "EMPTY")
             return null;
 
         var doc = XDocument.Parse(result.OutputValue);

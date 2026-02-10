@@ -6,10 +6,10 @@ namespace HeronSync.Infrastructure.Farmadati.Providers;
 
 public class CompositeProductBaseInfoProvider : IProductBaseInfoProvider
 {
-    private readonly IReadOnlyList<IProductBaseInfoProvider> _providers;
+    private readonly IEnumerable<IProductBaseInfoProvider> _providers;
 
     public CompositeProductBaseInfoProvider(
-        IReadOnlyList<IProductBaseInfoProvider> providers)
+        IEnumerable<IProductBaseInfoProvider> providers)
     {
         _providers = providers;
     }

@@ -48,7 +48,7 @@ public class BatchController : ControllerBase
 
         var batchId = await _batchRepo.CreateAsync(batch);
 
-        await _stepRepo.CreateDefaultStepsAsync(batchId);
+        await _stepRepo.CreateDefaultStepsAsync(batchId, req.CustomerId);
 
         return Ok(batchId);
     }

@@ -17,40 +17,49 @@ public class FarmadatiProductBaseInfoProvider_TE001 : IProductBaseInfoProvider
 
     public async Task<ProductBaseInfo?> GetBaseInfoAsync(string productCode)
     {
-        var result = await _client.ExecuteQueryAsync(
-            "TE001",
-            new[] { "FDI_0001", "FDI_0004" },
-            new[]
+        try 
+        { 
+            var result = await _client.ExecuteQueryAsync(
+                "TE001",
+                new[] { "FDI_0001", "FDI_0004" },
+                new[]
+                {
+                    new Filter { Key = "FDI_0001", Operator = "=", Value = productCode, OrGroup = 0 }
+                },
+                page: 1,
+                pageSize: 1
+            );
+
+            if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
+                return null;
+
+            var doc = XDocument.Parse(result.OutputValue);
+
+            var productNode = doc
+                .Descendants("Product")
+                .FirstOrDefault();
+
+            if (productNode == null)
+                return null;
+
+            var code = productNode.Element("FDI_0001")?.Value;
+            var name = productNode.Element("FDI_0004")?.Value;
+
+            if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(name))
+                return null;
+
+            return new ProductBaseInfo
             {
-                new Filter { Key = "FDI_0001", Operator = "=", Value = productCode, OrGroup = 0 }
-            },
-            page: 1,
-            pageSize: 1
-        );
-
-        if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
-            return null;
-
-        var doc = XDocument.Parse(result.OutputValue);
-
-        var productNode = doc
-            .Descendants("Product")
-            .FirstOrDefault();
-
-        if (productNode == null)
-            return null;
-
-        var code = productNode.Element("FDI_0001")?.Value;
-        var name = productNode.Element("FDI_0004")?.Value;
-
-        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(name))
-            return null;
-
-        return new ProductBaseInfo
+                ProductCode = code,
+                Name = name,
+                ShortDescription = name // fallback iniziale
+            };
+        }
+        catch(Exception e)
         {
-            ProductCode = code,
-            Name = name,
-            ShortDescription = name // fallback iniziale
-        };
+            var ee = e;
+        }
+
+        return null;
     }
 }

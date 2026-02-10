@@ -55,18 +55,18 @@ public class BatchOrchestratorWorker : BackgroundService
     private async Task ExecuteStep(StepExecution step)
     {
         await _stepRepo.SetRunningAsync(step.Id.ToString());
-
+        var StartedAt = DateTime.UtcNow;
         try
         {
             var processor = _processors
-                .FirstOrDefault(p => p.StepName == step.Step);
+                .FirstOrDefault(p => p.Step == step.Step);
 
             if (processor == null)
                 throw new Exception($"Processor non trovato per step {step.Step}");
 
             await processor.ExecuteAsync(step.BatchId.ToString());
 
-            await _stepRepo.SetSuccessAsync(step.Id.ToString());
+            await _stepRepo.SetSuccessAsync(step.Id.ToString(), StartedAt, DateTime.UtcNow);
         }
         catch (Exception ex)
         {

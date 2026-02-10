@@ -1,8 +1,10 @@
-﻿namespace HeronIntegration.Engine.Steps;
+﻿using HeronIntegration.Shared.Models;
+
+namespace HeronIntegration.Engine.Steps;
 
 public interface IStepProcessor
 {
-    string StepName { get; }
+    string Step { get; }
 
-    Task ExecuteAsync(string batchId);
+    Task<StepExecutionResult> ExecuteAsync(string batchId);
 }

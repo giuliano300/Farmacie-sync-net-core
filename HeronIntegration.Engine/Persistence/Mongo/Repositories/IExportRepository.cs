@@ -10,9 +10,12 @@ public interface IExportRepository
 
     Task<List<ExportExecution>> GetPendingAsync(string batchId, int take);
 
-    Task SetSuccessAsync(string id, string aic);
+    Task SetSuccessAsync(string batchId, string aic);
 
-    Task SetErrorAsync(string id, string aic, string error);
+    Task SetErrorAsync(string batchId, string aic, string error);
 
     Task<bool> ExistsAsync(string batchId, string aic);
+
+    Task ResetSingleAsync(string batchId, string aic);
+    Task ResetBatchAsync(string batchId);
 }

@@ -3,12 +3,14 @@ using HeronIntegration.Engine.External.Farmadati.Enrichment;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Models;
+using System.Linq.Expressions;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
 public class FarmadatiEnrichmentStepProcessor : IStepProcessor
 {
-    public string StepName => "Farmadati";
+    public string Step => "Farmadati";
 
     private readonly IRawProductRepository _rawRepo;
     private readonly IEnrichedProductRepository _enrichedRepo;
@@ -24,24 +26,42 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         _enrichmentService = enrichmentService;
     }
 
-    public async Task ExecuteAsync(string batchId)
+    public async Task<StepExecutionResult?> ExecuteAsync(string batchId)
     {
-        var raws = await _rawRepo.GetByBatchAsync(batchId);
-
-        foreach (var raw in raws)
+        var result = new StepExecutionResult();
+        result.StartedAt = DateTime.Now;
+        try
         {
-            // cache check
-            var cached = await _enrichedRepo.GetByAicAsync(raw.Aic);
-            if (cached != null)
-                continue;
+            var raws = await _rawRepo.GetByBatchAsync(batchId);
 
-            var enriched = await _enrichmentService.EnrichAsync(
-            raw.Aic,
-            raw.CustomerId,
-            batchId);
+            foreach (var raw in raws)
+            {
+                var exists = await _enrichedRepo.ExistsAsync(batchId, raw.Aic);
+                if (exists)
+                    continue;
 
-            if (enriched != null)
+                var enriched = await _enrichmentService.EnrichAsync(
+                raw.Aic,
+                raw.CustomerId,
+                batchId);
+
+                if (enriched == null)
+                {
+                    enriched = EnrichedProduct.CreateMinimal(raw, batchId);
+                }
+                
                 await _enrichedRepo.InsertAsync(enriched);
+            }
+
+            result.Success = true;
         }
+        catch (Exception ex) 
+        {
+            result.Success = false;
+            result.ErrorMessage = ex.Message;
+        }
+
+        result.FinishedAt = DateTime.Now;
+        return result;
     }
 }

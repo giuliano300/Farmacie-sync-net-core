@@ -12,13 +12,13 @@ public interface IStepRepository
 
     Task SetRunningAsync(string id);
 
-    Task SetSuccessAsync(string id);
+    Task SetSuccessAsync(string id, DateTime? StartedAt, DateTime? EndedAt);
 
     Task SetErrorAsync(string id, string error);
 
     Task<StepExecution?> GetNextPendingStepAsync(string batchId);
 
     Task<List<StepExecution>> GetByBatchAsync(string batchId);
-    Task CreateDefaultStepsAsync(string batchId);
+    Task CreateDefaultStepsAsync(string batchId, string customerId);
     Task ResetStepsAsync(string batchId);
 }

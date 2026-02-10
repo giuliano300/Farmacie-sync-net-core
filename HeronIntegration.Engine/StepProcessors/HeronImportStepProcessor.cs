@@ -2,13 +2,14 @@
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
 public class HeronImportStepProcessor : IStepProcessor
 {
-    public string StepName => "HeronImport";
+    public string Step => "HeronImport";
 
     private readonly IBatchRepository _batchRepo;
     private readonly IRawProductRepository _rawRepo;
@@ -27,47 +28,65 @@ public class HeronImportStepProcessor : IStepProcessor
         _parser = parser;
     }
 
-    public async Task ExecuteAsync(string batchId)
+    public async Task<StepExecutionResult> ExecuteAsync(string batchId)
     {
-        var batch = await _batchRepo.GetByIdAsync(batchId);
-        if (batch == null)
-            throw new Exception($"Batch {batchId} non trovato");
-
-        var parsed = _parser.Parse(batch.HeronFilePath!, batch.CustomerId);
-
-        var rawProducts = new List<RawProduct>();
-        var exportRows = new List<ExportExecution>();
-
-        foreach (var p in parsed)
+        var result = new StepExecutionResult
         {
-            rawProducts.Add(new RawProduct
-            {
-                BatchId = batch.Id,
-                CustomerId = batch.CustomerId,
-                Aic = p.Aic,
-                Name = p.Name,
-                Price = p.Price,
-                Stock = p.Stock,
-                CreatedAt = DateTime.UtcNow
-            });
+            StartedAt = DateTime.UtcNow
+        };
 
-            exportRows.Add(new ExportExecution
+        try
+        {
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            if (batch == null)
+                throw new Exception($"Batch {batchId} non trovato");
+
+            var parsed = _parser.Parse(batch.HeronFilePath!, batch.CustomerId);
+
+            var rawProducts = new List<RawProduct>();
+            var exportRows = new List<ExportExecution>();
+
+            foreach (var p in parsed)
             {
-                Id = ObjectId.GenerateNewId(),
-                BatchId = batch.Id,
-                CustomerId = batch.CustomerId,
-                Aic = p.Aic,
-                Status = Shared.Enums.ExportStatus.Pending,
-                AttemptCount = 0,
-                PayloadHash = Guid.NewGuid().ToString()
-            });
+                rawProducts.Add(new RawProduct
+                {
+                    BatchId = batch.Id,
+                    CustomerId = batch.CustomerId,
+                    Aic = p.Aic,
+                    Name = p.Name,
+                    Price = p.Price,
+                    Stock = p.Stock,
+                    CreatedAt = DateTime.UtcNow
+                });
+
+                exportRows.Add(new ExportExecution
+                {
+                    Id = ObjectId.GenerateNewId(),
+                    BatchId = batch.Id,
+                    CustomerId = batch.CustomerId,
+                    Aic = p.Aic,
+                    Status = Shared.Enums.ExportStatus.Pending,
+                    AttemptCount = 0,
+                    PayloadHash = Guid.NewGuid().ToString()
+                });
+            }
+
+            if (rawProducts.Count > 0)
+                await _rawRepo.InsertManyAsync(rawProducts);
+
+            if (exportRows.Count > 0)
+                await _exportRepo.InsertManyAsync(exportRows);
+
+            result.Success = true;
+        }
+        catch (Exception ex)
+        {
+            result.Success = false;
+            result.ErrorMessage = ex.Message;
         }
 
-        // 🔴 insert batch
-        if (rawProducts.Count > 0)
-            await _rawRepo.InsertManyAsync(rawProducts);
+        result.FinishedAt = DateTime.UtcNow;
 
-        if (exportRows.Count > 0)
-            await _exportRepo.InsertManyAsync(exportRows);
+        return result;
     }
 }
