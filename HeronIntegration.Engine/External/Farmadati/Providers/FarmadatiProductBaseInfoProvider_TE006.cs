@@ -2,6 +2,7 @@
 using HeronIntegration.Engine.External.Farmadati.Generated;
 using HeronIntegration.Engine.External.Farmadati.Interfaces;
 using HeronIntegration.Shared.Entities;
+using System.Xml.Linq;
 
 namespace HeronSync.Infrastructure.Farmadati.Providers;
 
@@ -30,13 +31,26 @@ public class FarmadatiProductBaseInfoProvider_TE006 : IProductBaseInfoProvider
         if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
             return null;
 
-        var parts = result.OutputValue.Split('|');
+        var doc = XDocument.Parse(result.OutputValue);
+
+        var productNode = doc
+            .Descendants("Product")
+            .FirstOrDefault();
+
+        if (productNode == null)
+            return null;
+
+        var code = productNode.Element("FDI_0001")?.Value;
+        var name = productNode.Element("FDI_0004")?.Value;
+
+        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(name))
+            return null;
 
         return new ProductBaseInfo
         {
-            ProductCode = parts[0],
-            Name = parts[1],
-            ShortDescription = parts[1]
+            ProductCode = code,
+            Name = name,
+            ShortDescription = name // fallback iniziale
         };
     }
 }

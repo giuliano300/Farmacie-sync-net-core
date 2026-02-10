@@ -109,6 +109,8 @@ builder.Services.AddHttpClient<FarmadatiImageDownloader>()
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
         });
 
+builder.Services.AddScoped<IFarmadatiCacheRepository, FarmadatiCacheRepository>();
+
 var app = builder.Build();
 
 app.MapControllers();

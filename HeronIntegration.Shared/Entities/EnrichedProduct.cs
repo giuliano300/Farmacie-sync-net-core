@@ -21,6 +21,7 @@ public class EnrichedProduct
     public string? LongDescription { get; set; }
 
     public string? Atc { get; set; }
+    public string? Source { get; set; }
     public decimal HeronPrice { get; set; }
     public int HeronStock { get; set; }
 
@@ -51,5 +52,27 @@ public class EnrichedProduct
             CreatedAt = DateTime.UtcNow
         };
     }
+
+        public static EnrichedProduct FromCache(
+        RawProduct raw,
+        FarmadatiCache cache,
+        string batchId)
+        {
+            return new EnrichedProduct
+            {
+                Id = ObjectId.GenerateNewId(),
+                BatchId = ObjectId.Parse(batchId),
+                CustomerId = raw.CustomerId,
+                Aic = raw.Aic,
+
+                Name = cache.Name,
+                ShortDescription = cache.ShortDescription,
+                LongDescription = cache.LongDescription,
+                Images = cache.Images ?? new List<ProductImage>(),
+
+                CreatedAt = DateTime.UtcNow,
+                Source = "CACHE"
+            };
+        }
 
 }
