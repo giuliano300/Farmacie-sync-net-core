@@ -23,7 +23,7 @@ public class SupplierStockRepository : ISupplierStockRepository
             .ToListAsync();
     }
 
-    public async Task ReplaceSupplierDatasetAsync(
+    public async Task ReplaceSupplierAsync(
     string supplierCode,
     IEnumerable<SupplierStock> items)
     {

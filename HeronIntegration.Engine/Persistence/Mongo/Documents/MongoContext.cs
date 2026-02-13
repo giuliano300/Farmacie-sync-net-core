@@ -48,4 +48,5 @@ public class MongoContext
 
     public IMongoCollection<ProducerMapping> ProducerMappings =>
     _database.GetCollection<ProducerMapping>("producer_mappings");
+
 }

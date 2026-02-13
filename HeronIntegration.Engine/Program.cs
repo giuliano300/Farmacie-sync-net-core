@@ -6,6 +6,7 @@ using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.StepProcessors;
 using HeronIntegration.Engine.Steps;
+using HeronIntegration.Engine.Suppliers;
 using HeronIntegration.Engine.Workers;
 using HeronSync.Infrastructure.Farmadati.Providers;
 
@@ -98,6 +99,19 @@ builder.Services.AddScoped<ICategoryResolver, CategoryResolver>();
 
 builder.Services.AddScoped<IProducerMappingRepository, ProducerMappingRepository>();
 builder.Services.AddScoped<IProducerResolver, ProducerResolver>();
+
+builder.Services.AddScoped<ISupplierStockProcessor, SupplierStockProcessor>();
+
+builder.Services.AddScoped<ISupplierFtpClient, SofarmaFtpClient>();
+builder.Services.AddScoped<ISupplierFtpClient, GuacciFtpClient>();
+builder.Services.AddScoped<ISupplierFtpClient, AllianceFtpClient>();
+builder.Services.AddScoped<ISupplierFtpClient, HeringFtpClient>();
+
+builder.Services.AddScoped<ISupplierParser, SofarmaParser>();
+builder.Services.AddScoped<ISupplierParser, GuacciParser>();
+builder.Services.AddScoped<ISupplierParser, AllianceParser>();
+builder.Services.AddScoped<ISupplierParser, HeringParser>();
+
 
 var host = builder.Build();
 host.Run();

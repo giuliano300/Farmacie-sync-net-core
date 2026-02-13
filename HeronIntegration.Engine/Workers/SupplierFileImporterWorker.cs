@@ -43,7 +43,7 @@ public class SupplierFileImporterWorker : BackgroundService
 
                 var items = ParseSupplierFile(localFile, supplier);
 
-                await _repo.ReplaceSupplierDatasetAsync(supplier.Code, items);
+                await _repo.ReplaceSupplierAsync(supplier.Code, items);
 
                 _logger.LogInformation("Supplier {Code} importato", supplier.Code);
             }
@@ -96,7 +96,6 @@ public class SupplierFileImporterWorker : BackgroundService
                 Aic = parts[0],
                 Price = decimal.Parse(parts[1], CultureInfo.InvariantCulture),
                 Availability = int.Parse(parts[2]),
-                Priority = supplier.Priority,
                 ImportedAt = DateTime.UtcNow
             });
         }

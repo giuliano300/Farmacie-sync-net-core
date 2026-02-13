@@ -16,7 +16,5 @@ public class SupplierStock
 
     public int Availability { get; set; }
 
-    public int Priority { get; set; }
-
     public DateTime ImportedAt { get; set; }
 }

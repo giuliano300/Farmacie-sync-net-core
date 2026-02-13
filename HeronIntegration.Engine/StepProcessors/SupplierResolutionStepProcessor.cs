@@ -8,7 +8,7 @@ namespace HeronIntegration.Engine.StepProcessors;
 
 public class SupplierResolutionStepProcessor : IStepProcessor
 {
-    public string Step => "Suppliers";
+    public string Step => "SuppliersResolutions";
 
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly ISupplierStockRepository _supplierRepo;
@@ -49,8 +49,7 @@ public class SupplierResolutionStepProcessor : IStepProcessor
                         SupplierCode = "HERON",
                         Aic = raw.Aic,
                         Price = raw.HeronPrice,
-                        Availability = raw.HeronStock,
-                        Priority = int.MaxValue
+                        Availability = raw.HeronStock
                     };
                 }
                 else
@@ -59,8 +58,7 @@ public class SupplierResolutionStepProcessor : IStepProcessor
                     var alternatives = await _supplierRepo.GetByAicAsync(raw.Aic);
 
                     chosen = alternatives
-                        .OrderByDescending(x => x.Priority)
-                        .ThenBy(x => x.Price)
+                        .OrderByDescending(x => x.Price)
                         .FirstOrDefault();
                 }
 
