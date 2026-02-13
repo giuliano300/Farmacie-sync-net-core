@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Shared.Entities;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using MongoDB.Driver.Linq;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -46,5 +47,14 @@ public class EnrichedProductRepository : IEnrichedProductRepository
         return await _context.EnrichedProducts
             .Find(filter)
             .AnyAsync();
+    }
+
+    public async Task<List<string>> GetAicsByBatchAsync(string batchId)
+    {
+        return await _context.EnrichedProducts
+        .AsQueryable()
+        .Where(x => x.BatchId == ObjectId.Parse(batchId))
+        .Select(x => x.Aic)
+        .ToListAsync();
     }
 }

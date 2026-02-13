@@ -7,5 +7,5 @@ public interface IProductImageProvider
     /// <summary>
     /// Recupera le immagini del prodotto.
     /// </summary>
-    Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode);
+    Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode, string name = "");
 }

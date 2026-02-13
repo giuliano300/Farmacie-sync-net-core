@@ -13,4 +13,5 @@ public interface IEnrichedProductRepository
     Task InsertManyAsync(IEnumerable<EnrichedProduct> products);
 
     Task<List<EnrichedProduct>> GetByBatchAsync(string batchId);
+    Task<List<string>> GetAicsByBatchAsync(string batchId);
 }

@@ -61,6 +61,8 @@ builder.Services.AddScoped<IProductLongDescriptionProvider>(sp =>
     return new CompositeLongDescriptionProvider(providers);
 });
 
+builder.Services.AddHttpClient<FreeImageService>();
+builder.Services.AddScoped<FreeImageService>();
 builder.Services.AddScoped<FarmadatiImageProvider_TE004>();
 builder.Services.AddScoped<FarmadatiImageProvider_TE009>();
 builder.Services.AddScoped<IProductImageProvider>(sp =>
@@ -68,14 +70,12 @@ builder.Services.AddScoped<IProductImageProvider>(sp =>
     var providers = new IProductImageProvider[]
     {
         sp.GetRequiredService<FarmadatiImageProvider_TE004>(),
-        sp.GetRequiredService<FarmadatiImageProvider_TE009>()
+        sp.GetRequiredService<FarmadatiImageProvider_TE009>(),
+        sp.GetRequiredService<FreeImageService>()
     };
 
     return new CompositeProductImageProvider(providers);
 });
-
-
-builder.Services.AddScoped<IProductEnrichmentService, ProductEnrichmentService>();
 
 builder.Services.AddScoped<IHeronXmlParser, HeronXmlParser>();
 
@@ -92,6 +92,12 @@ builder.Services.AddScoped<IStepProcessor, MagentoExportStepProcessor>();
 
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<ISupplierRepository, SupplierRepository>();
+
+builder.Services.AddScoped<ICategoryMappingRepository, CategoryMappingRepository>();
+builder.Services.AddScoped<ICategoryResolver, CategoryResolver>();
+
+builder.Services.AddScoped<IProducerMappingRepository, ProducerMappingRepository>();
+builder.Services.AddScoped<IProducerResolver, ProducerResolver>();
 
 var host = builder.Build();
 host.Run();

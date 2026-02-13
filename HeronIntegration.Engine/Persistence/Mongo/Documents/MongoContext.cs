@@ -42,4 +42,10 @@ public class MongoContext
 
     public IMongoCollection<Supplier> Suppliers =>
         _database.GetCollection<Supplier>("suppliers");
+
+    public IMongoCollection<CategoryMapping> CategoryMappings =>
+    _database.GetCollection<CategoryMapping>("category_mappings");
+
+    public IMongoCollection<ProducerMapping> ProducerMappings =>
+    _database.GetCollection<ProducerMapping>("producer_mappings");
 }

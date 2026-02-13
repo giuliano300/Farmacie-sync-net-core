@@ -37,26 +37,30 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         {
             var raws = await _rawRepo.GetByBatchAsync(batchId);
 
+            var existing = await _enrichedRepo.GetAicsByBatchAsync(batchId);
+            var existingSet = existing.ToHashSet();
+
+            var cacheList = await _farmadatiCacheRepo.GetByAicsAsync(raws.Select(x => x.Aic));
+            var cacheDict = cacheList.ToDictionary(x => x.Aic, x => x);
+
             var enrichedList = new List<EnrichedProduct>();
+            var newCacheList = new List<FarmadatiCache>();
 
             foreach (var raw in raws)
             {
-                var exists = await _enrichedRepo.ExistsAsync(batchId, raw.Aic);
-                if (exists)
+                if (existingSet.Contains(raw.Aic))
                     continue;
-
-                var cache = await _farmadatiCacheRepo.GetAsync(raw.Aic);
 
                 EnrichedProduct enriched;
 
-                if (cache != null)
+                if (cacheDict.TryGetValue(raw.Aic, out var cache))
                 {
-                    // costruisci enriched dalla cache
                     enriched = EnrichedProduct.FromCache(raw, cache, batchId);
                 }
                 else
                 {
-                    var enrichment = new EnrichedProduct();
+                    EnrichedProduct? enrichment = null;
+
                     try
                     {
                         enrichment = await _enrichmentService.EnrichAsync(
@@ -64,18 +68,11 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
                             raw.CustomerId,
                             batchId);
                     }
-                    catch(Exception e)
-                    {
-                        enrichment = null;
-                    };
+                    catch { }
 
-                    if (enrichment == null)
-                        enrichment = EnrichedProduct.CreateMinimal(raw, batchId);
+                    enriched = enrichment ?? EnrichedProduct.CreateMinimal(raw, batchId);
 
-                    enriched = enrichment;
-
-                    // prepara cache (NON salvare json enriched)
-                    var farmadatiCache = new FarmadatiCache
+                    newCacheList.Add(new FarmadatiCache
                     {
                         Aic = enriched.Aic,
                         Name = enriched.Name,
@@ -83,18 +80,17 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
                         LongDescription = enriched.LongDescription!,
                         Images = enriched.Images,
                         CachedAt = DateTime.UtcNow
-                    };
-
-                   await _farmadatiCacheRepo.InsertAsync(farmadatiCache);
+                    });
                 }
 
                 enrichedList.Add(enriched);
             }
 
-            // bulk insert
             if (enrichedList.Count > 0)
                 await _enrichedRepo.InsertManyAsync(enrichedList);
 
+            if (newCacheList.Count > 0)
+                await _farmadatiCacheRepo.InsertManyAsync(newCacheList);
             result.Success = true;
         }
         catch (Exception ex) 

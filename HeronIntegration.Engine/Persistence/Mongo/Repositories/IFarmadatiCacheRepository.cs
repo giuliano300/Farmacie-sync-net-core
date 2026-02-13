@@ -13,5 +13,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
         Task InsertAsync(FarmadatiCache cache);
 
         Task InsertManyAsync(IEnumerable<FarmadatiCache> caches);
+
+        Task<List<FarmadatiCache>> GetByAicsAsync(IEnumerable<string> aics);
     }
 }

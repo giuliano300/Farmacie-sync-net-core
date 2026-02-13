@@ -20,7 +20,7 @@ public class FarmadatiImageProvider_TE009 : IProductImageProvider
         _imageDownloader = imageDownloader;
     }
 
-    public async Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode)
+    public async Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode, string name = "")
     {
         var result = await _client.ExecuteQueryAsync(
             "TE009",

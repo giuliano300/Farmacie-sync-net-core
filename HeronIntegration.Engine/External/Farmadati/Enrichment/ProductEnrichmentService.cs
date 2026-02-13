@@ -28,7 +28,7 @@ public class ProductEnrichmentService : IProductEnrichmentService
             return null;
 
         var longDesc = await _longDescription.GetLongDescriptionAsync(productCode);
-        //var imgs = await _images.GetImagesAsync(productCode);
+        var imgs = await _images.GetImagesAsync(productCode, baseData.Name);
 
         return new EnrichedProduct
         {
@@ -39,7 +39,7 @@ public class ProductEnrichmentService : IProductEnrichmentService
             Name = baseData.Name,
             ShortDescription = baseData.ShortDescription,
             LongDescription = longDesc,
-            Images = new List<ProductImage>(),
+            Images = imgs.ToList() ?? new List<ProductImage>(),
             CachedAt = DateTime.UtcNow
         };
     }

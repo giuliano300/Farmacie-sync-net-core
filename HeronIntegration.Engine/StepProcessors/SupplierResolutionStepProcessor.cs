@@ -10,16 +10,16 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 {
     public string Step => "Suppliers";
 
-    private readonly IRawProductRepository _rawRepo;
+    private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly ISupplierStockRepository _supplierRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
 
     public SupplierResolutionStepProcessor(
-        IRawProductRepository rawRepo,
+        IEnrichedProductRepository enrichedRepo,
         ISupplierStockRepository supplierRepo,
         IResolvedProductRepository resolvedRepo)
     {
-        _rawRepo = rawRepo;
+        _enrichedRepo = enrichedRepo;
         _supplierRepo = supplierRepo;
         _resolvedRepo = resolvedRepo;
     }
@@ -33,7 +33,7 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 
         try
         {
-            var raws = await _rawRepo.GetByBatchAsync(batchId);
+            var raws = await _enrichedRepo.GetByBatchAsync(batchId);
 
             var resolvedList = new List<ResolvedProduct>();
 
@@ -41,21 +41,21 @@ public class SupplierResolutionStepProcessor : IStepProcessor
             {
                 SupplierStock? chosen = null;
 
-                // 1️⃣ se Heron disponibile → usa Heron
-                if (raw.Stock > 0)
+                // Se Heron disponibile → usa Heron
+                if (raw.HeronStock > 0)
                 {
                     chosen = new SupplierStock
                     {
                         SupplierCode = "HERON",
                         Aic = raw.Aic,
-                        Price = raw.Price,
-                        Availability = raw.Stock,
+                        Price = raw.HeronPrice,
+                        Availability = raw.HeronStock,
                         Priority = int.MaxValue
                     };
                 }
                 else
                 {
-                    // 5 cerca fornitori alternativi
+                    // Cerca fornitori alternativi
                     var alternatives = await _supplierRepo.GetByAicAsync(raw.Aic);
 
                     chosen = alternatives
@@ -76,7 +76,9 @@ public class SupplierResolutionStepProcessor : IStepProcessor
                     SupplierCode = chosen.SupplierCode,
                     Price = chosen.Price,
                     Availability = chosen.Availability,
-                    ResolvedAt = DateTime.UtcNow
+                    Name = raw.Name,
+                    ShortDescription = raw.ShortDescription,
+                    LongDescription = raw.LongDescription,
                 });
             }
 

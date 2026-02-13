@@ -31,4 +31,14 @@ public class FarmadatiCacheRepository : IFarmadatiCacheRepository
     {
         await _context.FarmadatiCaches.InsertManyAsync(cache);
     }
+
+    public async Task<List<FarmadatiCache>> GetByAicsAsync(IEnumerable<string> aics)
+    {
+        var filter = Builders<FarmadatiCache>.Filter
+            .In(x => x.Aic, aics);
+
+        return await _context.FarmadatiCaches
+            .Find(filter)
+            .ToListAsync();
+    }
 }

@@ -15,17 +15,23 @@ public class HeronImportStepProcessor : IStepProcessor
     private readonly IRawProductRepository _rawRepo;
     private readonly IExportRepository _exportRepo;
     private readonly IHeronXmlParser _parser;
+    private readonly ICategoryResolver _categoryResolver;
+    private readonly IProducerResolver _producerResolver;
 
     public HeronImportStepProcessor(
         IBatchRepository batchRepo,
         IRawProductRepository rawRepo,
         IExportRepository exportRepo,
-        IHeronXmlParser parser)
+        IHeronXmlParser parser,
+        ICategoryResolver categoryResolver,
+        IProducerResolver producerResolver)
     {
         _batchRepo = batchRepo;
         _rawRepo = rawRepo;
         _exportRepo = exportRepo;
         _parser = parser;
+        _categoryResolver = categoryResolver;
+        _producerResolver = producerResolver;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -46,8 +52,24 @@ public class HeronImportStepProcessor : IStepProcessor
             var rawProducts = new List<RawProduct>();
             var exportRows = new List<ExportExecution>();
 
+            var categoryMap = await _categoryResolver.LoadMappingsAsync(batch.CustomerId);
+            var producerMap = await _producerResolver.LoadMappingsAsync(batch.CustomerId);
+
             foreach (var p in parsed)
             {
+
+                var catKey = (p.Category, p.SubCategory);
+
+                var (category, subCategory) =
+                    categoryMap.TryGetValue(catKey!, out var mapped)
+                        ? mapped
+                        : (p.Category, p.SubCategory);
+
+                var producer =
+                    producerMap.TryGetValue(p.Producer!, out var mappedProducer)
+                        ? mappedProducer
+                        : p.Producer;
+
                 rawProducts.Add(new RawProduct
                 {
                     BatchId = batch.Id,
@@ -56,7 +78,10 @@ public class HeronImportStepProcessor : IStepProcessor
                     Name = p.Name,
                     Price = p.Price,
                     Stock = p.Stock,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    Category = category,
+                    SubCategory = subCategory,
+                    Producer = producer
                 });
 
                 exportRows.Add(new ExportExecution

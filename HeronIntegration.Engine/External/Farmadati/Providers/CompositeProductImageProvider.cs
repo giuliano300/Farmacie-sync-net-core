@@ -13,11 +13,11 @@ public class CompositeProductImageProvider : IProductImageProvider
         _providers = providers;
     }
 
-    public async Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode)
+    public async Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode, string name = "")
     {
         foreach (var provider in _providers)
         {
-            var images = await provider.GetImagesAsync(productCode);
+            var images = await provider.GetImagesAsync(productCode, name);
             if (images.Any())
                 return images;
         }

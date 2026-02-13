@@ -12,6 +12,12 @@ public class EnrichedProduct
 
     public string CustomerId { get; set; } = default!;
 
+    public string? Category { get; set; }
+
+    public string? SubCategory { get; set; }
+
+    public string? Producer { get; set; }
+
     public string Aic { get; set; } = default!;
 
     public string Name { get; set; } = default!;
@@ -24,6 +30,7 @@ public class EnrichedProduct
     public string? Source { get; set; }
     public decimal HeronPrice { get; set; }
     public int HeronStock { get; set; }
+
 
     public List<ProductImage> Images { get; set; } = new();
 
@@ -41,6 +48,10 @@ public class EnrichedProduct
             Name = raw.Name!,
             ShortDescription = raw.Name,
             LongDescription = null,
+
+            Category = raw.Category,
+            SubCategory = raw.SubCategory,
+            Producer = raw.Producer,
 
             Images = new List<ProductImage>(),
 
@@ -68,8 +79,14 @@ public class EnrichedProduct
                 Name = cache.Name,
                 ShortDescription = cache.ShortDescription,
                 LongDescription = cache.LongDescription,
-                Images = cache.Images ?? new List<ProductImage>(),
 
+                Category = raw.Category,
+                SubCategory = raw.SubCategory,
+                Producer = raw.Producer,
+
+                Images = cache.Images ?? new List<ProductImage>(),
+                HeronPrice = raw.Price,
+                HeronStock = raw.Stock,
                 CreatedAt = DateTime.UtcNow,
                 Source = "CACHE"
             };
