@@ -6,4 +6,5 @@ public interface ISupplierStockRepository
     Task ReplaceSupplierAsync(string supplierCode, IEnumerable<SupplierStock> items);
 
     Task<List<SupplierStock>> GetByAicAsync(string aic);
+    Task<List<SupplierStock>> GetByAicsAsync(List<string> aics);
 }

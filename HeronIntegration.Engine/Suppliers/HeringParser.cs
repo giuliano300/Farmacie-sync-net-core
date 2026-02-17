@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Shared.Entities;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -26,7 +27,7 @@ namespace HeronIntegration.Engine.Suppliers
                     SupplierCode = SupplierCode,
                     Aic = parts[i + 2],              // colonna AIC reale
                     Availability = ToInt(parts[i + 5]),
-                    Price = ToDecimal(parts[i + 8]),
+                    Price = decimal.Parse(parts[i + 8], CultureInfo.InvariantCulture),
                     ImportedAt = DateTime.UtcNow
                 };
             }

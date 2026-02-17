@@ -7,19 +7,11 @@ using System.Threading.Tasks;
 
 namespace HeronIntegration.Shared.Entities
 {
-    public class FarmadatiCache
+    public class ManagementCache
     {
         public ObjectId Id { get; set; } = ObjectId.GenerateNewId();
 
         public string Aic { get; set; }
-
-        public string Name { get; set; }
-
-        public string ShortDescription { get; set; }
-
-        public string LongDescription { get; set; }
-
-        public List<ProductImage> Images { get; set; } = new();
 
         public DateTime CachedAt { get; set; }
 

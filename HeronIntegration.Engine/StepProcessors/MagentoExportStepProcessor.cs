@@ -1,5 +1,6 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
+using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Models;
 
 public class MagentoExportStepProcessor : IStepProcessor
@@ -29,29 +30,80 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         try
         {
-            var resolved = await _resolvedRepo.GetByBatchAsync(batchId);
+            var manufacturersTask = _exporter.GetAttributeOptionsAsync("manufacturer");
+            var suppliersTask = _exporter.GetAttributeOptionsAsync("supplier");
+            var categoriesTask = _exporter.GetCategoryMapAsync();
 
-            foreach (var product in resolved)
+            await Task.WhenAll(manufacturersTask, suppliersTask, categoriesTask);
+
+            var manufacturers = manufacturersTask.Result
+                .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.First().Value,
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            var suppliers = suppliersTask.Result
+                .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.First().Value,
+                    StringComparer.OrdinalIgnoreCase
+                );
+
+            var categories = new Dictionary<string, int>(
+                categoriesTask.Result,
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
+
+            var r = resolvedList.Where(a => a.Aic == "900067479").ToList();
+
+            foreach (var p in r)
             {
-                var dto = new MagentoProductDto
+                // Supplier
+                if (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
+                    suppliers.TryGetValue(p.SupplierCode.ToLowerInvariant(), out var supplierId))
                 {
-                    Sku = product.Aic,
-                    Name = product.Aic,
-                    Price = product.Price,
-                    Quantity = product.Availability
-                };
+                    p.SupplierCode = supplierId.ToString();
+                }
+                else
+                    p.SupplierCode = "0";
 
-                try
+                // Manufacturer
+                if (!string.IsNullOrWhiteSpace(p.Producer) &&
+                    manufacturers.TryGetValue(p.Producer.ToLowerInvariant(), out var manufacturerId))
                 {
-                    await _exporter.ExportAsync(dto);
+                    p.Producer = manufacturerId.ToString();
+                }
+                else
+                    p.Producer = "0";
 
+                // Category
+                var categoryId = ResolveCategoryId(categories, p.SubCategory!.ToLowerInvariant());
+                if (categoryId != null)
+                    p.SubCategory = categoryId.ToString();
+            }
+
+            try
+            {
+                await _exporter.ExportBulkAsync(r);
+
+                foreach (var product in resolvedList)
+                {
                     await _exportRepo.SetSuccessAsync(batchId, product.Aic);
                 }
-                catch (Exception ex)
+            }
+            catch (Exception ex)
+            {
+                foreach (var product in resolvedList)
                 {
                     await _exportRepo.SetErrorAsync(batchId, product.Aic, ex.Message);
                 }
             }
+
             result.Success = true;
         }
         catch (Exception ex)
@@ -63,5 +115,20 @@ public class MagentoExportStepProcessor : IStepProcessor
         result.FinishedAt = DateTime.UtcNow;
 
         return result;
+    }
+
+    private static int? ResolveCategoryId(
+    Dictionary<string, int> categoryMap,
+    string categoryName)
+    {
+        var match = categoryMap
+            .FirstOrDefault(x =>
+                x.Key.EndsWith("/" + categoryName, StringComparison.OrdinalIgnoreCase)
+            );
+
+        if (match.Equals(default(KeyValuePair<string, int>)))
+            return null;
+
+        return match.Value;
     }
 }

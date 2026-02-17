@@ -21,7 +21,7 @@ namespace HeronIntegration.Engine.Suppliers
                 {
                     SupplierCode = SupplierCode,
                     Aic = parts[0],
-                    Availability = ToInt(parts[3]),
+                    Availability = ToInt(parts[6]),
                     Price = ToDecimal(parts[4]),
                     ImportedAt = DateTime.UtcNow
                 };

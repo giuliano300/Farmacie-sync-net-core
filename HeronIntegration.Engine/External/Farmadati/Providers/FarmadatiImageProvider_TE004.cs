@@ -4,6 +4,7 @@ using HeronIntegration.Engine.External.Farmadati.Generated;
 using HeronIntegration.Engine.External.Farmadati.Interfaces;
 using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Shared.Entities;
+using System.Buffers.Text;
 using System.Xml.Linq;
 
 namespace HeronSync.Infrastructure.Farmadati.Providers;
@@ -12,77 +13,90 @@ public class FarmadatiImageProvider_TE004 : IProductImageProvider
 {
     private readonly FarmadatiSoapClient _client;
     private readonly FarmadatiImageDownloader _imageDownloader;
+    private readonly ImageStorageService _imageStorage;
     public FarmadatiImageProvider_TE004(
         FarmadatiSoapClient client,
-        FarmadatiImageDownloader imageDownloader)
+        FarmadatiImageDownloader imageDownloader,
+        ImageStorageService imageStorage)
     {
         _client = client;
         _imageDownloader = imageDownloader;
+        _imageStorage = imageStorage;
     }
 
     public async Task<IReadOnlyList<ProductImage>> GetImagesAsync(string productCode, string name = "")
     {
-        var result = await _client.ExecuteQueryAsync(
-            "TE004",
-            new[]
-            {
-                "FDI_T456", // codice prodotto
-                "FDI_T457", // progressivo
-                "FDI_T459"  // nome file immagine
-            },
-            new[]
-            {
-                new Filter
-                {
-                    Key = "FDI_T456",
-                    Operator = "=",
-                    Value = productCode,
-                    OrGroup = 0
-                }
-            },
-            page: 1,
-            pageSize: 20
-        );
-
-        if (result.NumRecords == 0)
-            return Array.Empty<ProductImage>();
-
-        var doc = XDocument.Parse(result.OutputValue);
-
-        var images = new List<ProductImage>();
-
-        foreach (var p in doc.Descendants("Product"))
+        try
         {
-            var fileName = p.Element("FDI_T459")?.Value;
-            if (string.IsNullOrWhiteSpace(fileName))
-                continue;
+            var result = await _client.ExecuteQueryAsync(
+                "TE004",
+                new[]
+                {
+                    "FDI_T456", // codice prodotto
+                    "FDI_T457", // progressivo
+                    "FDI_T459"  // nome file immagine
+                },
+                new[]
+                {
+                    new Filter
+                    {
+                        Key = "FDI_T456",
+                        Operator = "=",
+                        Value = productCode,
+                        OrGroup = 0
+                    }
+                },
+                page: 1,
+                pageSize: 20
+            );
 
-            int.TryParse(p.Element("FDI_T457")?.Value, out var order);
+            if (result.NumRecords == 0)
+                return Array.Empty<ProductImage>();
 
-            var download = await _imageDownloader
-                .DownloadAsBase64Async("TE004", fileName);
+            var doc = XDocument.Parse(result.OutputValue);
 
-            if (download == null)
-                continue;
+            var images = new List<ProductImage>();
 
-            images.Add(new ProductImage
+            foreach (var p in doc.Descendants("Product"))
             {
-                Base64 = download.Value.Base64,
-                MimeType = download.Value.MimeType,
-                Order = order,
-                Type = "gallery",
-                AltText = fileName
-            });
+                var fileName = p.Element("FDI_T459")?.Value;
+                if (string.IsNullOrWhiteSpace(fileName))
+                    continue;
+
+                int.TryParse(p.Element("FDI_T457")?.Value, out var order);
+
+                var download = await _imageDownloader
+                    .DownloadAsBase64Async("TE004", fileName);
+
+                if (download == null)
+                    continue;
+
+                var bytes = Convert.FromBase64String(download.Value.Base64);
+
+                var gridId = await _imageStorage.SaveAsync(fileName, bytes, download.Value.MimeType);
+
+                images.Add(new ProductImage
+                {
+                    GridFsId = gridId,
+                    MimeType = download.Value.MimeType,
+                    Type = "gallery",
+                    AltText = fileName
+                });
+            }
+
+            images = images.ToList();
+
+            // Prima immagine = principale
+            if (images.Count > 0)
+                images[0].Type = "main";
+
+            return images;
+
         }
+        catch(Exception s)
+        {
 
-        images = images
-            .OrderBy(i => i.Order)
-            .ToList();
-
-        // Prima immagine = principale
-        if (images.Count > 0)
-            images[0].Type = "main";
-
-        return images;
+        }
+        return null;
     }
 }

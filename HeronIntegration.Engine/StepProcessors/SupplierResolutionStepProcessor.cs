@@ -8,7 +8,7 @@ namespace HeronIntegration.Engine.StepProcessors;
 
 public class SupplierResolutionStepProcessor : IStepProcessor
 {
-    public string Step => "SuppliersResolutions";
+    public string Step => "Suppliers";
 
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly ISupplierStockRepository _supplierRepo;
@@ -35,49 +35,44 @@ public class SupplierResolutionStepProcessor : IStepProcessor
         {
             var raws = await _enrichedRepo.GetByBatchAsync(batchId);
 
-            var resolvedList = new List<ResolvedProduct>();
+            if (raws == null || raws.Count == 0)
+                return result;
+
+            var batchObjectId = ObjectId.Parse(batchId);
+
+            // 1. Recupero tutti gli AIC necessari
+            var aics = raws.Select(x => x.Aic).Distinct().ToList();
+
+            // 2. Carico tutti gli stock supplier in UNA sola query
+            var supplierStocks = await _supplierRepo.GetByAicsAsync(aics);
+
+            // 3. Miglior supplier (prezzo minimo) per AIC
+            var bestSupplierByAic = supplierStocks
+                .Where(a=>a.Availability > 0)
+                .GroupBy(x => x.Aic)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderBy(x => x.Price).First()
+                );
+
+            var resolvedList = new List<ResolvedProduct>(raws.Count);
 
             foreach (var raw in raws)
             {
-                SupplierStock? chosen = null;
-
-                // Se Heron disponibile → usa Heron
-                if (raw.HeronStock > 0)
+                // HERON sempre candidato
+                var chosen = new SupplierStock
                 {
-                    chosen = new SupplierStock
-                    {
-                        SupplierCode = "HERON",
-                        Aic = raw.Aic,
-                        Price = raw.HeronPrice,
-                        Availability = raw.HeronStock
-                    };
-                }
-                else
-                {
-                    // Cerca fornitori alternativi
-                    var alternatives = await _supplierRepo.GetByAicAsync(raw.Aic);
-
-                    chosen = alternatives
-                        .OrderByDescending(x => x.Price)
-                        .FirstOrDefault();
-                }
-
-                if (chosen == null)
-                    continue;
-
-                resolvedList.Add(new ResolvedProduct
-                {
-                    Id = ObjectId.GenerateNewId(),
-                    BatchId = ObjectId.Parse(batchId),
-                    CustomerId = raw.CustomerId,
+                    SupplierCode = "HERON",
                     Aic = raw.Aic,
-                    SupplierCode = chosen.SupplierCode,
-                    Price = chosen.Price,
-                    Availability = chosen.Availability,
-                    Name = raw.Name,
-                    ShortDescription = raw.ShortDescription,
-                    LongDescription = raw.LongDescription,
-                });
+                    Price = raw.HeronPrice,
+                    Availability = raw.HeronStock
+                };
+
+                // supplier alternativi
+                if (bestSupplierByAic.TryGetValue(raw.Aic, out var best) && chosen.Availability == 0)
+                       chosen = best;
+
+                resolvedList.Add(ResolvedProduct.MapToResolved(raw, chosen, batchObjectId));
             }
 
             if (resolvedList.Count > 0)

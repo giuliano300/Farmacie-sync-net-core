@@ -49,4 +49,7 @@ public class MongoContext
     public IMongoCollection<ProducerMapping> ProducerMappings =>
     _database.GetCollection<ProducerMapping>("producer_mappings");
 
+    public IMongoCollection<ManagementCache> ManagementCaches =>
+    _database.GetCollection<ManagementCache>("management_cache");
+
 }

@@ -2,6 +2,7 @@ using HeronIntegration.Engine;
 using HeronIntegration.Engine.External.Farmadati;
 using HeronIntegration.Engine.External.Farmadati.Enrichment;
 using HeronIntegration.Engine.External.Farmadati.Interfaces;
+using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.StepProcessors;
@@ -31,11 +32,13 @@ builder.Services.AddScoped<FarmadatiSoapClient>();
 // Farmadati providers
 builder.Services.AddScoped<FarmadatiProductBaseInfoProvider>();
 builder.Services.AddScoped<FarmadatiProductBaseInfoProvider_TE001>();
+builder.Services.AddScoped<FarmadatiProductBaseInfoProvider_TE003>();
 builder.Services.AddScoped<FarmadatiProductBaseInfoProvider_TE006>();
 builder.Services.AddScoped<IProductBaseInfoProvider>(sp =>
 {
     var providers = new IProductBaseInfoProvider[]
     {
+        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE003>(),
         sp.GetRequiredService<FarmadatiProductBaseInfoProvider>(),
         sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE001>(),
         sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE006>()
@@ -62,6 +65,8 @@ builder.Services.AddScoped<IProductLongDescriptionProvider>(sp =>
     return new CompositeLongDescriptionProvider(providers);
 });
 
+builder.Services.AddHttpClient<ImageStorageService>();
+builder.Services.AddSingleton<ImageStorageService>();
 builder.Services.AddHttpClient<FreeImageService>();
 builder.Services.AddScoped<FreeImageService>();
 builder.Services.AddScoped<FarmadatiImageProvider_TE004>();
@@ -93,6 +98,7 @@ builder.Services.AddScoped<IStepProcessor, MagentoExportStepProcessor>();
 
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<ISupplierRepository, SupplierRepository>();
+builder.Services.AddScoped<IManagementCacheRepository, ManagementCacheRepository>();
 
 builder.Services.AddScoped<ICategoryMappingRepository, CategoryMappingRepository>();
 builder.Services.AddScoped<ICategoryResolver, CategoryResolver>();
@@ -112,6 +118,7 @@ builder.Services.AddScoped<ISupplierParser, GuacciParser>();
 builder.Services.AddScoped<ISupplierParser, AllianceParser>();
 builder.Services.AddScoped<ISupplierParser, HeringParser>();
 
+builder.Services.AddScoped<IManagementCacheRepository, ManagementCacheRepository>();
 
 var host = builder.Build();
 host.Run();

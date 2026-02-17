@@ -19,23 +19,36 @@ public class FarmadatiImageDownloader
         string datasetCode,
         string fileName)
     {
-        var url =
-            $"{_endpoint}" +
-            $"?accesskey={_password}" +
-            $"&tipodoc={datasetCode}" +
-            $"&nomefile={fileName}";
+        try
+        {
+            var url =
+                $"{_endpoint}" +
+                $"?accesskey={_password}" +
+                $"&tipodoc={datasetCode}" +
+                $"&nomefile={fileName}";
 
-        var response = await _httpClient.GetAsync(url);
-        if (!response.IsSuccessStatusCode)
-            return null;
+            var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+                return null;
 
-        var bytes = await response.Content.ReadAsByteArrayAsync();
-        if (bytes.Length == 0)
-            return null;
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+            if (bytes.Length == 0)
+                return null;
 
-        var mime = response.Content.Headers.ContentType?.MediaType
-                   ?? "image/jpeg";
+            var mime = response.Content.Headers.ContentType?.MediaType
+                       ?? "image/jpeg";
 
-        return (Convert.ToBase64String(bytes), mime);
+            var base64 = Convert.ToBase64String(bytes);
+
+            // rimuove eventuali newline (importantissimo)
+            base64 = base64.Replace("\r", "").Replace("\n", "");
+
+            return (base64, mime);
+        }
+        catch (Exception ex)
+        {
+        }
+        return null;
+
     }
 }

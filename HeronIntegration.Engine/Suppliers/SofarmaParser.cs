@@ -22,7 +22,7 @@ namespace HeronIntegration.Engine.Suppliers
                     SupplierCode = SupplierCode,
                     Aic = parts[0],
                     Availability = ToInt(parts[5]),
-                    Price = ToDecimal(parts[7]),
+                    Price = ToDecimal(parts[7].Replace(",",".")),
                     ImportedAt = DateTime.UtcNow
                 };
             }

@@ -32,4 +32,10 @@ public class SupplierStockRepository : ISupplierStockRepository
         await _context.SupplierStocks.InsertManyAsync(items);
     }
 
+    public async Task<List<SupplierStock>> GetByAicsAsync(List<string> aics)
+    {
+        return await _context.SupplierStocks
+            .Find(x => aics.Contains(x.Aic))
+            .ToListAsync();
+    }
 }

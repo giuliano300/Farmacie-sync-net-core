@@ -36,4 +36,33 @@ public class ResolvedProduct
     public List<ProductImage> Images { get; set; } = new();
 
     public DateTime ResolvedAt { get; set; }
+
+
+    public static ResolvedProduct MapToResolved(
+    EnrichedProduct raw,
+    SupplierStock chosen,
+    ObjectId batchObjectId)
+    {
+        return new ResolvedProduct
+        {
+            Id = ObjectId.GenerateNewId(),
+            BatchId = batchObjectId,
+            CustomerId = raw.CustomerId,
+            Category = raw.Category,
+            SubCategory = raw.SubCategory,
+            Producer = raw.Producer,
+            Aic = raw.Aic,
+            Name = raw.Name,
+            ShortDescription = raw.ShortDescription,
+            LongDescription = raw.LongDescription,
+            Atc = raw.Atc,
+            Source = raw.Source,
+            Price = chosen.Price,
+            Availability = chosen.Availability,
+            SupplierCode = chosen.SupplierCode,
+            Images = raw.Images,
+            ResolvedAt = DateTime.UtcNow
+        };
+    }
+
 }

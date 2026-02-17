@@ -18,6 +18,8 @@ public class CompositeProductImageProvider : IProductImageProvider
         foreach (var provider in _providers)
         {
             var images = await provider.GetImagesAsync(productCode, name);
+
+            //Console.WriteLine(images[0].Base64);
             if (images.Any())
                 return images;
         }

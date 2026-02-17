@@ -25,7 +25,7 @@ public class ProductEnrichmentService : IProductEnrichmentService
         var baseData = await _baseInfo.GetBaseInfoAsync(productCode);
 
         if (baseData == null)
-            return null;
+           return null;
 
         var longDesc = await _longDescription.GetLongDescriptionAsync(productCode);
         var imgs = await _images.GetImagesAsync(productCode, baseData.Name);
