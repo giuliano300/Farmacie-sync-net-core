@@ -20,11 +20,12 @@ public class MagentoExporter : IMagentoExporter
         _imageStorage = imageStorage;
     }
 
-    public async Task ExportAsync(ResolvedProduct p)
+    public async Task<MagentoInsertResult> ExportAsync(ResolvedProduct p)
     {
+        var res = new MagentoInsertResult();
         var payload = new
         {
-            product = BuildMagentoProduct(p)
+            product = await BuildMagentoProduct(p)
         };
 
         var json = JsonSerializer.Serialize(payload);
@@ -46,7 +47,13 @@ public class MagentoExporter : IMagentoExporter
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
-            throw new Exception(body);
+        {
+            res.Success = false;
+            res.ErrorMessage = response.ReasonPhrase;
+            return res;
+        }
+
+        return res;
     }
 
 
@@ -56,12 +63,16 @@ public class MagentoExporter : IMagentoExporter
 
         foreach (var chunk in products.Chunk(chunkSize))
         {
-            var payload = chunk
-                .Select(p => new
+            var payload = new List<object>();
+
+            foreach (var p in chunk)
+            {
+                payload.Add(new
                 {
-                    product = BuildMagentoProduct(p)
-                })
-                .ToList();
+                    product = await BuildMagentoProduct(p)
+                });
+            }
+
 
             var json = JsonSerializer.Serialize(payload);
 

@@ -6,7 +6,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public interface IMagentoExporter
 {
-    Task ExportAsync(ResolvedProduct product);
+    Task<MagentoInsertResult> ExportAsync(ResolvedProduct product);
     Task ExportBulkAsync(List<ResolvedProduct> product);
 
     Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode);

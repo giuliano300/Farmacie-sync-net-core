@@ -38,19 +38,11 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             var manufacturers = manufacturersTask.Result
                 .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.First().Value,
-                    StringComparer.OrdinalIgnoreCase
-                );
+                .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.OrdinalIgnoreCase);
 
             var suppliers = suppliersTask.Result
                 .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.First().Value,
-                    StringComparer.OrdinalIgnoreCase
-                );
+                .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.OrdinalIgnoreCase);
 
             var categories = new Dictionary<string, int>(
                 categoriesTask.Result,
@@ -59,50 +51,50 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
 
-            var r = resolvedList.Where(a => a.Aic == "900067479").ToList();
+            var semaphore = new SemaphoreSlim(8);
 
-            foreach (var p in r)
+            var tasks = resolvedList.Select(async p =>
             {
-                // Supplier
-                if (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
-                    suppliers.TryGetValue(p.SupplierCode.ToLowerInvariant(), out var supplierId))
+                await semaphore.WaitAsync();
+                try
                 {
-                    p.SupplierCode = supplierId.ToString();
-                }
-                else
-                    p.SupplierCode = "0";
+                    // Supplier
+                    if (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
+                        suppliers.TryGetValue(p.SupplierCode.ToLowerInvariant(), out var supplierId))
+                        p.SupplierCode = supplierId.ToString();
+                    else
+                        p.SupplierCode = "0";
 
-                // Manufacturer
-                if (!string.IsNullOrWhiteSpace(p.Producer) &&
-                    manufacturers.TryGetValue(p.Producer.ToLowerInvariant(), out var manufacturerId))
+                    // Manufacturer
+                    if (!string.IsNullOrWhiteSpace(p.Producer) &&
+                        manufacturers.TryGetValue(p.Producer.ToLowerInvariant(), out var manufacturerId))
+                        p.Producer = manufacturerId.ToString();
+                    else
+                        p.Producer = "0";
+
+                    // Category
+                    var categoryId = ResolveCategoryId(categories, p.SubCategory!.ToLowerInvariant());
+                    if (categoryId != null)
+                        p.SubCategory = categoryId.ToString();
+
+                    var res = await _exporter.ExportAsync(p);
+
+                    if (res.Success)
+                        await _exportRepo.SetSuccessAsync(batchId, p.Aic);
+                    else
+                        await _exportRepo.SetErrorAsync(batchId, p.Aic, res.ErrorMessage!);
+                }
+                catch (Exception ex)
                 {
-                    p.Producer = manufacturerId.ToString();
+                    await _exportRepo.SetErrorAsync(batchId, p.Aic, ex.Message);
                 }
-                else
-                    p.Producer = "0";
-
-                // Category
-                var categoryId = ResolveCategoryId(categories, p.SubCategory!.ToLowerInvariant());
-                if (categoryId != null)
-                    p.SubCategory = categoryId.ToString();
-            }
-
-            try
-            {
-                await _exporter.ExportBulkAsync(r);
-
-                foreach (var product in resolvedList)
+                finally
                 {
-                    await _exportRepo.SetSuccessAsync(batchId, product.Aic);
+                    semaphore.Release();
                 }
-            }
-            catch (Exception ex)
-            {
-                foreach (var product in resolvedList)
-                {
-                    await _exportRepo.SetErrorAsync(batchId, product.Aic, ex.Message);
-                }
-            }
+            });
+
+            await Task.WhenAll(tasks);
 
             result.Success = true;
         }
@@ -113,7 +105,6 @@ public class MagentoExportStepProcessor : IStepProcessor
         }
 
         result.FinishedAt = DateTime.UtcNow;
-
         return result;
     }
 
