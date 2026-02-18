@@ -7,9 +7,16 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 public interface IMagentoExporter
 {
     Task<MagentoInsertResult> ExportAsync(ResolvedProduct product);
-    Task ExportBulkAsync(List<ResolvedProduct> product);
+    Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct product);
 
     Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode);
 
     Task<Dictionary<string, int>> GetCategoryMapAsync();
+    Task<string> BuildProductBatchAsync(IEnumerable<ResolvedProduct> products);
+
+    Task TriggerBatchImportAsync(string filePath);
+
+    Task BulkInventoryAsync(IEnumerable<InventoryItem> items);
+
+    void UploadBatchToMagento(string localFile);
 }

@@ -36,4 +36,10 @@ public class RawProductRepository : IRawProductRepository
             .Find(x => x.BatchId == ObjectId.Parse(batchId))
             .ToListAsync();
     }
+
+    public async Task DeleteByBatchAsync(string batchId)
+    {
+        var filter = Builders<RawProduct>.Filter.Eq("BatchId", batchId);
+        await _context.RawProducts.DeleteManyAsync(filter);
+    }
 }

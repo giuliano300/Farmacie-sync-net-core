@@ -1,4 +1,5 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+using HeronIntegration.Shared.Entities;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -18,4 +19,6 @@ public interface IExportRepository
 
     Task ResetSingleAsync(string batchId, string aic);
     Task ResetBatchAsync(string batchId);
+    Task<BatchReport> BuildBatchReportAsync(string batchId);
+
 }

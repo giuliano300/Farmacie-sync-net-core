@@ -25,4 +25,10 @@ public class ResolvedProductRepository : IResolvedProductRepository
             .ToListAsync();
     }
 
+    public async Task DeleteByBatchAsync(string batchId)
+    {
+        var filter = Builders<ResolvedProduct>.Filter.Eq("BatchId", batchId);
+        await _context.ResolvedProducts.DeleteManyAsync(filter);
+    }
+
 }

@@ -57,4 +57,10 @@ public class EnrichedProductRepository : IEnrichedProductRepository
         .Select(x => x.Aic)
         .ToListAsync();
     }
+
+    public async Task DeleteByBatchAsync(string batchId)
+    {
+        var filter = Builders<EnrichedProduct>.Filter.Eq("BatchId", batchId);
+        await _context.EnrichedProducts.DeleteManyAsync(filter);
+    }
 }

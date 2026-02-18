@@ -1,17 +1,21 @@
-﻿using MongoDB.Bson;
-using MongoDB.Driver;
-using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
+using MongoDB.Bson;
+using MongoDB.Driver;
+using System.Text.Json;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public class ExportRepository : IExportRepository
 {
     private readonly MongoContext _context;
+    private readonly IBatchReportRepository _batchReport;
 
-    public ExportRepository(MongoContext context)
+    public ExportRepository(MongoContext context, IBatchReportRepository batchReport)
     {
         _context = context;
+        _batchReport = batchReport;
     }
 
     public async Task InsertManyAsync(IEnumerable<ExportExecution> exports)
@@ -42,7 +46,7 @@ public class ExportRepository : IExportRepository
             .Inc(x => x.AttemptCount, 1);
 
         await _context.ExportExecutions.UpdateOneAsync(
-            x => x.Id == ObjectId.Parse(id) &&
+            x => x.BatchId == ObjectId.Parse(id) &&
             x.Aic == aic,
             update);
     }
@@ -56,7 +60,7 @@ public class ExportRepository : IExportRepository
             .Inc(x => x.AttemptCount, 1);
 
         await _context.ExportExecutions.UpdateOneAsync(
-            x => x.Id == ObjectId.Parse(id) &&
+            x => x.BatchId == ObjectId.Parse(id) &&
             x.Aic == aic,
             update);
     }
@@ -91,5 +95,34 @@ public class ExportRepository : IExportRepository
                 .Set(x => x.ErrorMessage, null)
         );
     }
+
+    public async Task<BatchReport> BuildBatchReportAsync(string batchId)
+    {
+        var total = await _context.ExportExecutions.CountDocumentsAsync(
+            x => x.BatchId == ObjectId.Parse(batchId)
+        );
+
+        var success = await _context.ExportExecutions.CountDocumentsAsync(
+            x => x.BatchId == ObjectId.Parse(batchId) && x.Status == ExportStatus.Success
+        );
+
+        var errors = await _context.ExportExecutions.CountDocumentsAsync(
+            x => x.BatchId == ObjectId.Parse(batchId) && x.Status == ExportStatus.Error
+        );
+
+        var report = new BatchReport
+        {
+            BatchId = batchId,
+            FinishedAt = DateTime.UtcNow,
+            TotalProducts = (int)total,
+            Success = (int)success,
+            Errors = (int)errors
+        };
+
+        await _batchReport.InsertOneAsync(report);
+
+        return report;
+    }
+
 
 }

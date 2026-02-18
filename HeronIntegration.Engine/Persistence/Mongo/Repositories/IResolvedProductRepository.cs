@@ -5,4 +5,6 @@ public interface IResolvedProductRepository
     Task InsertManyAsync(IEnumerable<ResolvedProduct> items);
 
     Task<List<ResolvedProduct>> GetByBatchAsync(string batchId);
+
+    Task DeleteByBatchAsync(string batchId);
 }
