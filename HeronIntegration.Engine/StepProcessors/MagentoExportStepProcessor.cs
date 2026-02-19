@@ -41,10 +41,20 @@ public class MagentoExportStepProcessor : IStepProcessor
             await Task.WhenAll(manufacturersTask, suppliersTask, categoriesTask);
 
             var manufacturers = manufacturersTask.Result
-                .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+                .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.First().Value,
+                    StringComparer.OrdinalIgnoreCase
+                );
 
             var suppliers = suppliersTask.Result
-                .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+                .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.First().Value,
+                    StringComparer.OrdinalIgnoreCase
+                );
 
             var categories = new Dictionary<string, int>(
                 categoriesTask.Result,

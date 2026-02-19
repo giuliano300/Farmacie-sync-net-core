@@ -55,6 +55,31 @@ public class MagentoExporter : IMagentoExporter
                 return res;
             }
 
+            // 2️⃣ AGGIUNGI SOURCE INVENTORY (MSI)
+            var inventoryPayload = new
+            {
+                sourceItems = new[]
+                {
+                    new
+                    {
+                        sku = p.Aic,
+                        source_code = "default", // ⚠ verifica che sia la tua source
+                        quantity = p.Availability,
+                        status = 1 // 1 = In Stock
+                    }
+                }
+            };
+
+            var l = new List<InventoryItem>();
+            var i = new InventoryItem()
+            {
+                Qty = p.Availability,
+                Sku = p.Aic
+            };
+            l.Add(i);
+
+            await BulkInventoryAsync(l);
+
             res.Success = true;
             return res;
         }
@@ -175,6 +200,8 @@ public class MagentoExporter : IMagentoExporter
             weight = 1,
             custom_attributes = new[]
             {
+            new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
+            new { attribute_code = "short_description", value = p.ShortDescription },            
             new { attribute_code = "supplier", value = p.SupplierCode },
             new { attribute_code = "manufacturer", value = p.Producer }
         }
@@ -244,20 +271,42 @@ public class MagentoExporter : IMagentoExporter
     }
     public async Task BulkInventoryAsync(IEnumerable<InventoryItem> items)
     {
+        const int maxParallel = 15; // numero sicuro per Magento
+        using var semaphore = new SemaphoreSlim(maxParallel);
+
+        var tasks = items.Select(async item =>
+        {
+            await semaphore.WaitAsync();
+
+            try
+            {
+                await UpdateStockAsync(item);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task UpdateStockAsync(InventoryItem item)
+    {
         var payload = new
         {
-            sourceItems = items.Select(i => new
+            stockItem = new
             {
-                source_code = "default",
-                sku = i.Sku,
-                quantity = i.Qty,
-                status = i.Qty > 0 ? 1 : 0
-            })
+                qty = item.Qty,
+                is_in_stock = item.Qty > 0,
+                manage_stock = true,
+                use_config_manage_stock = false
+            }
         };
 
         var req = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/inventory/source-items"
+            HttpMethod.Put,
+            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{item.Sku}/stockItems/1"
         );
 
         req.Headers.Authorization =
@@ -272,10 +321,13 @@ public class MagentoExporter : IMagentoExporter
         var res = await _http.SendAsync(req);
 
         if (!res.IsSuccessStatusCode)
-            throw new Exception(await res.Content.ReadAsStringAsync());
+        {
+            var body = await res.Content.ReadAsStringAsync();
+            throw new Exception($"SKU {item.Sku}: {body}");
+        }
     }
 
-    private object BuildMagentoProductWithoutImages(ResolvedProduct p)
+    public object BuildMagentoProductWithoutImages(ResolvedProduct p)
     {
         string urlKey = BuildUrlKey(p.Name, p.Aic);
 
@@ -300,12 +352,15 @@ public class MagentoExporter : IMagentoExporter
             weight = 1,
             custom_attributes = new[]
             {
+            new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
+            new { attribute_code = "short_description", value = p.ShortDescription },
             new { attribute_code = "supplier", value = p.SupplierCode },
             new { attribute_code = "manufacturer", value = p.Producer },
             new { attribute_code = "url_key", value = urlKey }
         },
             extension_attributes = new
             {
+                website_ids = new[] { 1 },
                 stock_item = new
                 {
                     qty = p.Availability,

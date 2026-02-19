@@ -19,4 +19,6 @@ public interface IMagentoExporter
     Task BulkInventoryAsync(IEnumerable<InventoryItem> items);
 
     void UploadBatchToMagento(string localFile);
+
+    object BuildMagentoProductWithoutImages(ResolvedProduct p);
 }

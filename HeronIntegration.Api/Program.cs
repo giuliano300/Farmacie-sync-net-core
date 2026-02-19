@@ -145,6 +145,12 @@ builder.Services.AddScoped<ISupplierParser, HeringParser>();
 
 builder.Services.AddScoped<IManagementCacheRepository, ManagementCacheRepository>();
 
+builder.Services.AddScoped<IBatchReportRepository, BatchReportRepository>();
+
+builder.Services.AddScoped<IBatchFinalizerService, BatchFinalizerService>();
+builder.Services.AddScoped<IBatchReportService, BatchReportService>();
+builder.Services.AddScoped<ICleanupService, CleanupService>();
+
 var app = builder.Build();
 
 app.MapControllers();
