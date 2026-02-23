@@ -2,7 +2,11 @@
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Models;
+using Renci.SshNet;
+using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 public class MagentoExportStepProcessor : IStepProcessor
 {
@@ -34,75 +38,100 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         try
         {
+            // =============================
+            // 1️⃣ CARICAMENTO METADATI
+            // =============================
             var manufacturersTask = _exporter.GetAttributeOptionsAsync("manufacturer");
             var suppliersTask = _exporter.GetAttributeOptionsAsync("supplier");
             var categoriesTask = _exporter.GetCategoryMapAsync();
 
             await Task.WhenAll(manufacturersTask, suppliersTask, categoriesTask);
 
-            var manufacturers = manufacturersTask.Result
-                .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            var manufacturersRaw = manufacturersTask.Result;
+            var suppliersRaw = suppliersTask.Result;
+            var categoriesRaw = categoriesTask.Result;
+
+            var manufacturers = manufacturersRaw
+                .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+                .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    g => g.Key,
+                    g => g.Key.Trim(),
                     g => g.First().Value,
                     StringComparer.OrdinalIgnoreCase
                 );
 
-            var suppliers = suppliersTask.Result
-                .GroupBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            var suppliers = suppliersRaw
+                .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+                .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    g => g.Key,
+                    g => g.Key.Trim(),
                     g => g.First().Value,
                     StringComparer.OrdinalIgnoreCase
                 );
 
-            var categories = new Dictionary<string, int>(
-                categoriesTask.Result,
-                StringComparer.OrdinalIgnoreCase
-            );
-
+            var categories = categoriesRaw
+                .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+                .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key.Trim(),
+                    g => g.First().Value,
+                    StringComparer.OrdinalIgnoreCase
+                );
+            
+            // =============================
+            // 2️⃣ CARICAMENTO PRODOTTI RISOLTI
+            // =============================
             var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
 
-            // ===== STEP 1 BUILD PRODUCT BATCH =====
-            foreach (var p in resolvedList)
-            {
-                if (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
-                    suppliers.TryGetValue(p.SupplierCode.ToLowerInvariant(), out var supplierId))
-                    p.SupplierCode = supplierId.ToString();
-                else
-                    p.SupplierCode = "0";
-
-                if (!string.IsNullOrWhiteSpace(p.Producer) &&
-                    manufacturers.TryGetValue(p.Producer.ToLowerInvariant(), out var manufacturerId))
-                    p.Producer = manufacturerId.ToString();
-                else
-                    p.Producer = "0";
-
-                var categoryId = ResolveCategoryId(categories, p.SubCategory!.ToLowerInvariant());
-                if (categoryId != null)
-                    p.SubCategory = categoryId.ToString();
-            }
-
-            var batchFile = await _exporter.BuildProductBatchAsync(resolvedList);
-
-            _exporter.UploadBatchToMagento(batchFile);
-
-            // ===== STEP 2 TRIGGER MAGENTO IMPORT =====
-            await _exporter.TriggerBatchImportAsync(batchFile);
-
-            // ===== STEP 3 BULK INVENTORY =====
-            await _exporter.BulkInventoryAsync(
-                resolvedList.Select(x => new InventoryItem
+            var mappedList = resolvedList
+                .Select(p =>
                 {
-                    Sku = x.Aic,
-                    Qty = x.Availability
-                })
-            );
+                    var mapped = new ResolvedProduct
+                    {
+                        Aic = p.Aic,
+                        Name = p.Name,
+                        Price = p.Price,
+                        Availability = p.Availability,
+                        LongDescription = p.LongDescription,
+                        ShortDescription = p.ShortDescription,
 
-            // ===== STEP 4 IMAGES =====
+                        // 🔹 Supplier
+                        SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
+                                        suppliers.TryGetValue(p.SupplierCode, out var supplierId))
+                            ? supplierId.ToString()
+                            : "0",
+
+                        // 🔹 Manufacturer
+                        Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
+                                    manufacturers.TryGetValue(p.Producer, out var manufacturerId))
+                            ? manufacturerId.ToString()
+                            : "0",
+
+                        // 🔹 Categoria
+                        SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
+                                       ResolveCategoryId(categories, p.SubCategory) is int categoryId)
+                            ? categoryId.ToString()
+                            : null,
+
+                        Images = p.Images
+                    };
+
+                    return mapped;
+                })
+                .ToList();
+
+
+            // =============================
+            // 3️⃣ UPSERT PRODOTTI (PARALLELO)
+            // =============================
+            await _exporter.ImportProductsAsync(mappedList);
+
+            // =============================
+            // 4️⃣ UPLOAD IMMAGINI (PARALLELO LIMITATO)
+            // =============================
             var semaphore = new SemaphoreSlim(4);
 
-            var tasks = resolvedList.Select(async p =>
+            var imageTasks = resolvedList.Select(async p =>
             {
                 await semaphore.WaitAsync();
                 try
@@ -120,9 +149,16 @@ public class MagentoExportStepProcessor : IStepProcessor
                 }
             });
 
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(imageTasks);
 
-            // ===== FINALIZZAZIONE BATCH =====
+            // =============================
+            // 5️⃣ ESECUZIONE CRON MAGENTO
+            // =============================
+            await _exporter.RunMagentoCronAsync();
+
+            // =============================
+            // 5️⃣ FINALIZZAZIONE
+            // =============================
             await _batchFinalizer.FinalizeBatchAsync(batchId);
 
             result.Success = true;
@@ -136,7 +172,6 @@ public class MagentoExportStepProcessor : IStepProcessor
         result.FinishedAt = DateTime.UtcNow;
         return result;
     }
-
     private static int? ResolveCategoryId(
     Dictionary<string, int> categoryMap,
     string categoryName)
@@ -147,9 +182,17 @@ public class MagentoExportStepProcessor : IStepProcessor
             );
 
         if (match.Equals(default(KeyValuePair<string, int>)))
-            return null;
-
+        {
+            var matchNoCat = categoryMap
+                .FirstOrDefault(x =>
+                    x.Key.EndsWith("/da smistare", StringComparison.OrdinalIgnoreCase)
+                );
+            if (matchNoCat.Equals(default(KeyValuePair<string, int>)))
+                return null;
+            return matchNoCat.Value;
+        }
         return match.Value;
     }
+
 
 }

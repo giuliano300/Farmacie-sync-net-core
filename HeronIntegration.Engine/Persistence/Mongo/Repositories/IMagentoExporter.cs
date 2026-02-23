@@ -1,24 +1,24 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
-using HeronIntegration.Shared.Entities;
+﻿using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Models;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public interface IMagentoExporter
 {
+    // 🔹 Import singolo prodotto
     Task<MagentoInsertResult> ExportAsync(ResolvedProduct product);
+
+    // 🔹 Upload immagini
     Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct product);
 
+    // 🔹 Import massivo ottimizzato (NUOVO - non rompe nulla)
+    Task ImportProductsAsync(IEnumerable<ResolvedProduct> products);
+
+    // 🔹 Attributi e categorie
     Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode);
 
     Task<Dictionary<string, int>> GetCategoryMapAsync();
-    Task<string> BuildProductBatchAsync(IEnumerable<ResolvedProduct> products);
 
-    Task TriggerBatchImportAsync(string filePath);
+    Task RunMagentoCronAsync();
 
-    Task BulkInventoryAsync(IEnumerable<InventoryItem> items);
-
-    void UploadBatchToMagento(string localFile);
-
-    object BuildMagentoProductWithoutImages(ResolvedProduct p);
 }

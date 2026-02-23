@@ -1,9 +1,8 @@
-﻿using FluentFTP;
-using HeronIntegration.Engine.External.Farmadati.Services;
+﻿using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Models;
-using System.IO;
+using Renci.SshNet;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -14,113 +13,120 @@ public class MagentoExporter : IMagentoExporter
     private readonly IConfiguration _config;
     private readonly ImageStorageService _imageStorage;
 
-    public MagentoExporter(HttpClient http, IConfiguration config, ImageStorageService imageStorage)
+    private const int MaxParallel = 24;
+
+    public MagentoExporter(
+        HttpClient http,
+        IConfiguration config,
+        ImageStorageService imageStorage)
     {
         _http = http;
         _config = config;
         _imageStorage = imageStorage;
+
+        _http.Timeout = TimeSpan.FromMinutes(10);
     }
 
+    // =====================================================
+    // 🔹 EXPORT SINGOLO (ORA USA PUT → UPSERT PIÙ VELOCE)
+    // =====================================================
     public async Task<MagentoInsertResult> ExportAsync(ResolvedProduct p)
     {
-        var res = new MagentoInsertResult();
+        var result = new MagentoInsertResult();
 
         try
         {
-            // 1. CREA PRODOTTO SENZA IMMAGINI
-            var payload = new
-            {
-                product = BuildMagentoProductWithoutImages(p)
-            };
-
-            var json = JsonSerializer.Serialize(payload);
-
-            var request = new HttpRequestMessage(
-                HttpMethod.Post,
-                $"{_config["Magento:BaseUrl"]}/rest/V1/products"
-            );
-
-            request.Headers.Authorization =
-                new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
-
-            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-            var response = await _http.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
-
-            if (!response.IsSuccessStatusCode)
-            {
-                res.Success = false;
-                res.ErrorMessage = body;
-                return res;
-            }
-
-            // 2️⃣ AGGIUNGI SOURCE INVENTORY (MSI)
-            var inventoryPayload = new
-            {
-                sourceItems = new[]
-                {
-                    new
-                    {
-                        sku = p.Aic,
-                        source_code = "default", // ⚠ verifica che sia la tua source
-                        quantity = p.Availability,
-                        status = 1 // 1 = In Stock
-                    }
-                }
-            };
-
-            var l = new List<InventoryItem>();
-            var i = new InventoryItem()
-            {
-                Qty = p.Availability,
-                Sku = p.Aic
-            };
-            l.Add(i);
-
-            await BulkInventoryAsync(l);
-
-            res.Success = true;
-            return res;
+            await UpsertProductAsync(p);
+            result.Success = true;
         }
         catch (Exception ex)
         {
-            res.Success = false;
-            res.ErrorMessage = ex.Message;
-            return res;
+            result.Success = false;
+            result.ErrorMessage = ex.Message;
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // 🚀 IMPORT MASSIVO PARALLELO (NUOVO)
+    // =====================================================
+    public async Task ImportProductsAsync(IEnumerable<ResolvedProduct> products)
+    {
+        using var semaphore = new SemaphoreSlim(MaxParallel);
+
+        var tasks = products.Select(async p =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                await UpsertProductAsync(p);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    // =====================================================
+    // 🔥 UPSERT PRODOTTO (PUT SEMPRE)
+    // =====================================================
+    private async Task UpsertProductAsync(ResolvedProduct p)
+    {
+        var payload = new
+        {
+            product = BuildMagentoProductWithoutImages(p)
+        };
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{p.Aic}"
+        );
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        await SendAsync(request);
+
+        await UpdateQuantityAsync(p.Aic, p.Availability);
+    }
+
+    // =====================================================
+    // 🔁 HTTP SAFE SEND
+    // =====================================================
+    private async Task SendAsync(HttpRequestMessage request)
+    {
+        var response = await _http.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new Exception(body);
         }
     }
+
+    // =====================================================
+    // 🖼 UPLOAD IMMAGINI (NON CANCELLA PIÙ TUTTO)
+    // =====================================================
     public async Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct p)
     {
-        var res = new MagentoInsertResult();
+        var result = new MagentoInsertResult();
+
         try
         {
-            // 1. recupera immagini esistenti
-            var get = new HttpRequestMessage(
-                HttpMethod.Get,
-                $"{_config["Magento:BaseUrl"]}/rest/V1/products/{p.Aic}/media"
-            );
-
-            get.Headers.Authorization =
-                new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
-
-            var resp = await _http.SendAsync(get);
-            var jsonDel = await resp.Content.ReadAsStringAsync();
-
-            var entries = JsonSerializer.Deserialize<List<MagentoMediaEntry>>(jsonDel);
-
-            // 2. cancella immagini esistenti
-            foreach (var e in entries!)
+            if (p.Images == null || !p.Images.Any())
             {
-                var del = new HttpRequestMessage(
-                    HttpMethod.Delete,
-                    $"{_config["Magento:BaseUrl"]}/rest/V1/products/{p.Aic}/media/{e.id}"
-                );
-
-                del.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
-
-                await _http.SendAsync(del);
+                result.Success = true;
+                return result;
             }
 
             for (int i = 0; i < p.Images.Count; i++)
@@ -151,8 +157,6 @@ public class MagentoExporter : IMagentoExporter
                     }
                 };
 
-                var json = JsonSerializer.Serialize(payload);
-
                 var request = new HttpRequestMessage(
                     HttpMethod.Post,
                     $"{_config["Magento:BaseUrl"]}/rest/V1/products/{p.Aic}/media"
@@ -161,185 +165,42 @@ public class MagentoExporter : IMagentoExporter
                 request.Headers.Authorization =
                     new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
 
-                request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+                request.Content = new StringContent(
+                    JsonSerializer.Serialize(payload),
+                    Encoding.UTF8,
+                    "application/json"
+                );
 
-                var response = await _http.SendAsync(request);
-                var body = await response.Content.ReadAsStringAsync();
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    res.Success = false;
-                    res.ErrorMessage = body;
-                    return res;
-                }
+                await SendAsync(request);
             }
 
-            res.Success = true;
-            return res;
+            result.Success = true;
         }
         catch (Exception ex)
         {
-            res.Success = false;
-            res.ErrorMessage = ex.Message;
-            return res;
+            result.Success = false;
+            result.ErrorMessage = ex.Message;
         }
 
+        return result;
     }
 
-    public async Task<string> BuildProductBatchAsync(IEnumerable<ResolvedProduct> products)
-    {
-        var payload = products.Select(p => new
-        {
-            sku = p.Aic,
-            name = p.Name,
-            attribute_set_id = 4,
-            price = p.Price,
-            status = 1,
-            visibility = 4,
-            type_id = "simple",
-            weight = 1,
-            custom_attributes = new[]
-            {
-            new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
-            new { attribute_code = "short_description", value = p.ShortDescription },            
-            new { attribute_code = "supplier", value = p.SupplierCode },
-            new { attribute_code = "manufacturer", value = p.Producer }
-        }
-        });
-
-        var fileName = $"products_{DateTime.UtcNow:yyyyMMddHHmmss}.json";
-        var path = Path.Combine("batch", fileName);
-
-        Directory.CreateDirectory("batch");
-
-        var json = JsonSerializer.Serialize(payload);
-
-        await File.WriteAllTextAsync(path, json);
-
-        return path;
-    }
-
-    public async Task TriggerBatchImportAsync(string filePath)
-    {
-        var fileName = Path.GetFileName(filePath);
-
-        var payload = new
-        {
-            file = fileName,
-            entity = "catalog_product"
-        };
-
-        var req = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/import"
-        );
-
-        req.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
-
-        req.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
-            Encoding.UTF8,
-            "application/json"
-        );
-
-        var res = await _http.SendAsync(req);
-
-        if (!res.IsSuccessStatusCode)
-            throw new Exception(await res.Content.ReadAsStringAsync());
-    }
-
-    public void UploadBatchToMagento(string localFile)
-    {
-        var ftpUri = new Uri(_config["Magento:FtpUri"]!);
-        var remoteFolder = _config["Magento:FtpImportPath"];
-
-        var user = ftpUri.UserInfo.Split(':')[0];
-        var pass = ftpUri.UserInfo.Split(':')[1];
-
-        using var client = new FtpClient(ftpUri.Host, user, pass);
-
-        client.Connect();
-
-        var remoteFile = $"{remoteFolder}/{Path.GetFileName(localFile)}";
-
-        using var stream = File.OpenRead(localFile);
-
-        client.UploadStream(stream, remoteFile, FtpRemoteExists.Overwrite, true);
-
-        client.Disconnect();
-    }
-    public async Task BulkInventoryAsync(IEnumerable<InventoryItem> items)
-    {
-        const int maxParallel = 15; // numero sicuro per Magento
-        using var semaphore = new SemaphoreSlim(maxParallel);
-
-        var tasks = items.Select(async item =>
-        {
-            await semaphore.WaitAsync();
-
-            try
-            {
-                await UpdateStockAsync(item);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
-    }
-
-    private async Task UpdateStockAsync(InventoryItem item)
-    {
-        var payload = new
-        {
-            stockItem = new
-            {
-                qty = item.Qty,
-                is_in_stock = item.Qty > 0,
-                manage_stock = true,
-                use_config_manage_stock = false
-            }
-        };
-
-        var req = new HttpRequestMessage(
-            HttpMethod.Put,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{item.Sku}/stockItems/1"
-        );
-
-        req.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
-
-        req.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
-            Encoding.UTF8,
-            "application/json"
-        );
-
-        var res = await _http.SendAsync(req);
-
-        if (!res.IsSuccessStatusCode)
-        {
-            var body = await res.Content.ReadAsStringAsync();
-            throw new Exception($"SKU {item.Sku}: {body}");
-        }
-    }
-
+    // =====================================================
+    // 🏗 COSTRUZIONE PRODOTTO
+    // =====================================================
     public object BuildMagentoProductWithoutImages(ResolvedProduct p)
     {
-        string urlKey = BuildUrlKey(p.Name, p.Aic);
 
-        var categoryLinks = new[]
+        var categoryLinks = new List<object>();
+
+        if (!string.IsNullOrWhiteSpace(p.SubCategory))
         {
-        new
-        {
-            position = 0,
-            category_id = p.SubCategory
+            categoryLinks.Add(new
+            {
+                position = 0,
+                category_id = p.SubCategory
+            });
         }
-    };
-
         return new
         {
             sku = p.Aic,
@@ -352,12 +213,12 @@ public class MagentoExporter : IMagentoExporter
             weight = 1,
             custom_attributes = new[]
             {
-            new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
-            new { attribute_code = "short_description", value = p.ShortDescription },
-            new { attribute_code = "supplier", value = p.SupplierCode },
-            new { attribute_code = "manufacturer", value = p.Producer },
-            new { attribute_code = "url_key", value = urlKey }
-        },
+                new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
+                new { attribute_code = "short_description", value = p.ShortDescription },
+                new { attribute_code = "supplier", value = p.SupplierCode },
+                new { attribute_code = "manufacturer", value = p.Producer },
+                new { attribute_code = "url_key", value = BuildUrlKey(p.Name, p.Aic) }
+            },
             extension_attributes = new
             {
                 website_ids = new[] { 1 },
@@ -371,7 +232,45 @@ public class MagentoExporter : IMagentoExporter
         };
     }
 
-    private static string BuildUrlKey(string name, string aic)
+    private async Task UpdateQuantityAsync(string sku, int qty)
+    {
+        var payload = new
+        {
+            stockItem = new
+            {
+                qty = qty,
+                is_in_stock = qty > 0,
+                manage_stock = true,
+                use_config_manage_stock = false
+            }
+        };
+
+        var req = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}/stockItems/1"
+        );
+
+        req.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+
+        req.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        var j = JsonSerializer.Serialize(payload);
+
+        var response = await _http.SendAsync(req);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new Exception($"SKU {sku}: {body}");
+        }
+    }
+
+    private static string BuildUrlKey(string name, string sku)
     {
         var slug = name
             .ToLowerInvariant()
@@ -380,9 +279,12 @@ public class MagentoExporter : IMagentoExporter
             .Replace(",", "")
             .Replace("/", "-");
 
-        return $"{aic}-{slug}";
+        return $"{sku}-{slug}";
     }
 
+    // =====================================================
+    // 🔹 GET ATTRIBUTE OPTIONS
+    // =====================================================
     public async Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode)
     {
         var url = $"{_config["Magento:BaseUrl"]}/rest/V1/products/attributes/{attributeCode}/options";
@@ -398,17 +300,21 @@ public class MagentoExporter : IMagentoExporter
         if (!response.IsSuccessStatusCode)
             throw new Exception(body);
 
-        var options = JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body);
+        var options = JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
         return options!
             .Where(x => !string.IsNullOrEmpty(x.value))
-            .GroupBy(x => x.label)
+            .GroupBy(x => x.label.Trim())
             .ToDictionary(
                 g => g.Key,
                 g => int.Parse(g.First().value)
             );
     }
 
+    // =====================================================
+    // 🔹 GET CATEGORY MAP (FLATTEN TREE)
+    // =====================================================
     public async Task<Dictionary<string, int>> GetCategoryMapAsync()
     {
         var request = new HttpRequestMessage(
@@ -425,19 +331,24 @@ public class MagentoExporter : IMagentoExporter
         if (!response.IsSuccessStatusCode)
             throw new Exception(json);
 
-        var root = JsonSerializer.Deserialize<MagentoCategory>(json);
+        var root = JsonSerializer.Deserialize<MagentoCategory>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
         var map = new Dictionary<string, int>();
 
-        FlattenCategories(root, map, "");
+        if (root != null)
+            FlattenCategories(root, map, "");
 
         return map;
     }
 
+    // =====================================================
+    // 🔹 RECURSIVE FLATTEN
+    // =====================================================
     private void FlattenCategories(
-    MagentoCategory node,
-    Dictionary<string, int> map,
-    string parentPath)
+        MagentoCategory node,
+        Dictionary<string, int> map,
+        string parentPath)
     {
         var currentPath = string.IsNullOrEmpty(parentPath)
             ? node.name
@@ -452,6 +363,28 @@ public class MagentoExporter : IMagentoExporter
         {
             FlattenCategories(child, map, currentPath);
         }
+    }
+
+
+    public async Task RunMagentoCronAsync()
+    {
+        var host = _config["Magento:FtpHost"];
+        var user = _config["Magento:FtpUser"];
+        var password = _config["Magento:FtpPassword"];
+
+        using var client = new SshClient(host, user, password);
+
+        client.Connect();
+
+        if (!client.IsConnected)
+            throw new Exception("Connessione SSH fallita.");
+
+        // Eseguiamo cron 2 volte (Magento lo richiede)
+        client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
+        await Task.Delay(3000);
+        client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
+
+        client.Disconnect();
     }
 
 }
