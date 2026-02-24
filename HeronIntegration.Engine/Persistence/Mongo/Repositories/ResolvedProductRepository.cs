@@ -25,6 +25,13 @@ public class ResolvedProductRepository : IResolvedProductRepository
             .ToListAsync();
     }
 
+    public async Task<ResolvedProduct> GetById(string id)
+    {
+        return await _context.ResolvedProducts
+            .Find(x => x.Id == ObjectId.Parse(id))
+            .FirstOrDefaultAsync();
+    }
+
     public async Task DeleteByBatchAsync(string batchId)
     {
         var filter = Builders<ResolvedProduct>.Filter.Eq("BatchId", batchId);

@@ -38,100 +38,168 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         try
         {
-            // =============================
-            // 1️⃣ CARICAMENTO METADATI
-            // =============================
+            // =====================================================
+            // CARICAMENTO METADATI MAGENTO
+            // =====================================================
             var manufacturersTask = _exporter.GetAttributeOptionsAsync("manufacturer");
             var suppliersTask = _exporter.GetAttributeOptionsAsync("supplier");
             var categoriesTask = _exporter.GetCategoryMapAsync();
+            var magentoProductsTask = _exporter.GetMagentoProductsSlimAsync();
 
-            await Task.WhenAll(manufacturersTask, suppliersTask, categoriesTask);
+            await Task.WhenAll(
+                manufacturersTask,
+                suppliersTask,
+                categoriesTask,
+                magentoProductsTask
+            );
 
-            var manufacturersRaw = manufacturersTask.Result;
-            var suppliersRaw = suppliersTask.Result;
-            var categoriesRaw = categoriesTask.Result;
-
-            var manufacturers = manufacturersRaw
+            var manufacturers = manufacturersTask.Result
                 .Where(x => !string.IsNullOrWhiteSpace(x.Key))
                 .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    g => g.Key.Trim(),
+                    g => g.Key,
                     g => g.First().Value,
                     StringComparer.OrdinalIgnoreCase
                 );
 
-            var suppliers = suppliersRaw
+            var suppliers = suppliersTask.Result
                 .Where(x => !string.IsNullOrWhiteSpace(x.Key))
                 .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    g => g.Key.Trim(),
+                    g => g.Key,
                     g => g.First().Value,
                     StringComparer.OrdinalIgnoreCase
                 );
 
-            var categories = categoriesRaw
+            var categories = categoriesTask.Result
                 .Where(x => !string.IsNullOrWhiteSpace(x.Key))
                 .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
-                    g => g.Key.Trim(),
+                    g => g.Key,
                     g => g.First().Value,
                     StringComparer.OrdinalIgnoreCase
                 );
-            
-            // =============================
-            // 2️⃣ CARICAMENTO PRODOTTI RISOLTI
-            // =============================
+
+            var magentoProducts = magentoProductsTask.Result;
+            var magentoDict = magentoProducts
+                .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
+
+            // =====================================================
+            //  CARICAMENTO PRODOTTI MONGO
+            // =====================================================
             var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
 
-            var mappedList = resolvedList
-                .Select(p =>
+            var mappedList = resolvedList.Select(p =>
+            {
+                return new ResolvedProduct
                 {
-                    var mapped = new ResolvedProduct
-                    {
-                        Aic = p.Aic,
-                        Name = p.Name,
-                        Price = p.Price,
-                        Availability = p.Availability,
-                        LongDescription = p.LongDescription,
-                        ShortDescription = p.ShortDescription,
+                    Aic = p.Aic,
+                    Name = p.Name,
+                    Price = p.Price,
+                    Availability = p.Availability,
+                    LongDescription = p.LongDescription,
+                    ShortDescription = p.ShortDescription,
+                    SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
+                                    suppliers.TryGetValue(p.SupplierCode, out var supplierId))
+                                        ? supplierId.ToString()
+                                        : "0",
+                    Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
+                                manufacturers.TryGetValue(p.Producer, out var manufacturerId))
+                                        ? manufacturerId.ToString()
+                                        : "0",
+                    SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
+                                   ResolveCategoryId(categories, p.SubCategory) is int categoryId)
+                                        ? categoryId.ToString()
+                                        : null,
+                    Images = p.Images
+                };
+            }).ToList();
 
-                        // 🔹 Supplier
-                        SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
-                                        suppliers.TryGetValue(p.SupplierCode, out var supplierId))
-                            ? supplierId.ToString()
-                            : "0",
+            var mongoDict = mappedList
+                .ToDictionary(x => x.Aic, StringComparer.OrdinalIgnoreCase);
 
-                        // 🔹 Manufacturer
-                        Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
-                                    manufacturers.TryGetValue(p.Producer, out var manufacturerId))
-                            ? manufacturerId.ToString()
-                            : "0",
+            // =====================================================
+            // CALCOLO UPSERT (insert + update)
+            // =====================================================
+            var toUpsert = new List<ResolvedProduct>();
 
-                        // 🔹 Categoria
-                        SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
-                                       ResolveCategoryId(categories, p.SubCategory) is int categoryId)
-                            ? categoryId.ToString()
-                            : null,
+            foreach (var mongoProduct in mappedList)
+            {
+                if (!magentoDict.TryGetValue(mongoProduct.Aic, out var magentoProduct))
+                {
+                    toUpsert.Add(mongoProduct);
+                    continue;
+                }
 
-                        Images = p.Images
-                    };
+                bool needsUpdate = false;
 
-                    return mapped;
-                })
+                if (magentoProduct.Price != mongoProduct.Price)
+                    needsUpdate = true;
+
+                if ((magentoProduct.Manufacturer ?? "") != (mongoProduct.Producer ?? ""))
+                    needsUpdate = true;
+
+                if ((magentoProduct.Supplier ?? "") != (mongoProduct.SupplierCode ?? ""))
+                    needsUpdate = true;
+
+                if ((magentoProduct.Description ?? "").Trim() !=
+                    (mongoProduct.ShortDescription ?? "").Trim() && ((magentoProduct.Description ?? "").Trim() !=
+                    (mongoProduct.LongDescription ?? "").Trim()))
+                    needsUpdate = true;
+
+                var mongoCats = new HashSet<string>(
+                    new[] { mongoProduct.SubCategory! }
+                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+
+                var magentoCats = new HashSet<string>(
+                    magentoProduct.Categories ?? new List<string>());
+
+                if (!mongoCats.IsSubsetOf(magentoCats))
+                    needsUpdate = true;
+
+                if (needsUpdate)
+                    toUpsert.Add(mongoProduct);
+            }
+
+            // =====================================================
+            // SKU DA DISABILITARE
+            // =====================================================
+            var toDisable = magentoProducts
+                .Where(m => !mongoDict.ContainsKey(m.Sku))
+                .Select(m => m.Sku)
                 .ToList();
 
 
-            // =============================
-            // 3️⃣ UPSERT PRODOTTI (PARALLELO)
-            // =============================
-            await _exporter.ImportProductsAsync(mappedList);
+            // =====================================================
+            //  UPSERT
+            // =====================================================
+            if (toUpsert.Any())
+                await _exporter.ImportProductsAsync(toUpsert);
 
-            // =============================
-            // 4️⃣ UPLOAD IMMAGINI (PARALLELO LIMITATO)
-            // =============================
+
+            // =====================================================
+            //  UPDATE STOCK
+            // =====================================================
+            await _exporter.UpdateStockBulkAsync(
+                mappedList.Select(p => new InventoryItem
+                {
+                    Sku = p.Aic,
+                    Qty = p.Availability
+                })
+                .ToList());
+
+            // =====================================================
+            // 6 DISABILITAZIONE PRODOTTI MANCANTI
+            // =====================================================
+            if (toDisable.Any())
+                await _exporter.DisableProductsAsync(toDisable);
+
+            // =====================================================
+            //  UPLOAD IMMAGINI SOLO PER UPSERT
+            // =====================================================
             var semaphore = new SemaphoreSlim(4);
 
-            var imageTasks = resolvedList.Select(async p =>
+            var imageTasks = toUpsert.Select(async p =>
             {
                 await semaphore.WaitAsync();
                 try
@@ -151,14 +219,14 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             await Task.WhenAll(imageTasks);
 
-            // =============================
-            // 5️⃣ ESECUZIONE CRON MAGENTO
-            // =============================
+            // =====================================================
+            // 8️⃣ CRON MAGENTO
+            // =====================================================
             await _exporter.RunMagentoCronAsync();
 
-            // =============================
-            // 5️⃣ FINALIZZAZIONE
-            // =============================
+            // =====================================================
+            // 9️⃣ FINALIZZAZIONE
+            // =====================================================
             await _batchFinalizer.FinalizeBatchAsync(batchId);
 
             result.Success = true;

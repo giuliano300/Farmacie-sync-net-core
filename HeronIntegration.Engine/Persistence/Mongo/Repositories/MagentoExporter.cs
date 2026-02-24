@@ -2,6 +2,7 @@
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Models;
+using MongoDB.Bson.IO;
 using Renci.SshNet;
 using System.Net.Http.Headers;
 using System.Text;
@@ -13,7 +14,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly IConfiguration _config;
     private readonly ImageStorageService _imageStorage;
 
-    private const int MaxParallel = 24;
+    private const int MaxParallel = 15;
 
     public MagentoExporter(
         HttpClient http,
@@ -97,7 +98,7 @@ public class MagentoExporter : IMagentoExporter
 
         await SendAsync(request);
 
-        await UpdateQuantityAsync(p.Aic, p.Availability);
+        //await UpdateQuantityAsync(p.Aic, p.Availability);
     }
 
     // =====================================================
@@ -115,7 +116,7 @@ public class MagentoExporter : IMagentoExporter
     }
 
     // =====================================================
-    // 🖼 UPLOAD IMMAGINI (NON CANCELLA PIÙ TUTTO)
+    // 🖼 UPLOAD IMMAGINI  
     // =====================================================
     public async Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct p)
     {
@@ -151,11 +152,13 @@ public class MagentoExporter : IMagentoExporter
                         content = new
                         {
                             base64_encoded_data = base64,
-                            type = img.MimeType ?? "image/jpeg",
+                            type = "image/jpeg",
                             name = img.AltText ?? $"img{i}.jpg"
                         }
                     }
                 };
+
+                var j = JsonSerializer.Serialize(payload);
 
                 var request = new HttpRequestMessage(
                     HttpMethod.Post,
@@ -381,10 +384,203 @@ public class MagentoExporter : IMagentoExporter
 
         // Eseguiamo cron 2 volte (Magento lo richiede)
         client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
-        await Task.Delay(3000);
+        await Task.Delay(20000);
         client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
 
         client.Disconnect();
     }
 
+
+    public async Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync()
+    {
+        var result = new List<MagentoSlimProduct>();
+
+        int page = 1;
+        const int pageSize = 200;
+        int total;
+
+        try
+        {
+            do
+            {
+                var url =
+                    $"{_config["Magento:BaseUrl"]}/rest/V1/products?" +
+                    $"searchCriteria[currentPage]={page}&" +
+                    $"searchCriteria[pageSize]={pageSize}&" +
+                    $"fields=items[sku,price,custom_attributes[attribute_code,value],extension_attributes[category_links[category_id]]],total_count";
+
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+
+                var response = await _http.SendAsync(request);
+                var json = await response.Content.ReadAsStringAsync();
+
+                if (!response.IsSuccessStatusCode)
+                    throw new Exception(json);
+
+                var pageResult = JsonSerializer.Deserialize<ProductSearchResult>(json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                foreach (var item in pageResult.Items)
+                {
+                    var manufacturer = item.CustomAttributes?
+                        .FirstOrDefault(x => x.AttributeCode == "manufacturer")?.Value?.ToString();
+
+                    var supplier = item.CustomAttributes?
+                        .FirstOrDefault(x => x.AttributeCode == "supplier")?.Value?.ToString();
+
+                    var description = item.CustomAttributes?
+                        .FirstOrDefault(x => x.AttributeCode == "description")?.Value?.ToString();
+
+                   var Categories = ExtractCategories(item.ExtensionAttributes);
+
+                    result.Add(new MagentoSlimProduct
+                    {
+                        Sku = item.Sku,
+                        Price = item.Price,
+                        Manufacturer = manufacturer,
+                        Supplier = supplier,
+                        Description = description,
+                        Categories = Categories
+                    });
+                }
+
+                total = pageResult.TotalCount;
+                page++;
+            } 
+                while ((page - 1) * pageSize < total);
+            }
+            catch(Exception e)
+            {
+                var ec = e;
+            }
+
+        return result;
+    }
+
+
+    public async Task DisableProductsAsync(List<string> skus)
+    {
+        if (skus == null || skus.Count == 0)
+            return;
+
+        using var semaphore = new SemaphoreSlim(MaxParallel);
+
+        var tasks = skus.Select(async sku =>
+        {
+            await semaphore.WaitAsync();
+
+            try
+            {
+                await DisableProductAsync(sku);
+            }
+            catch (Exception ex)
+            {
+                // puoi loggare qui se vuoi
+                Console.WriteLine($"Errore disabilitando SKU {sku}: {ex.Message}");
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+
+    private static List<string> ExtractCategories(JsonElement extensionAttributes)
+    {
+        var result = new List<string>();
+
+        // Se è [] → ignora
+        if (extensionAttributes.ValueKind != JsonValueKind.Object)
+            return result;
+
+        if (!extensionAttributes.TryGetProperty("category_links", out var links))
+            return result;
+
+        if (links.ValueKind != JsonValueKind.Array)
+            return result;
+
+        foreach (var link in links.EnumerateArray())
+        {
+            if (!link.TryGetProperty("category_id", out var categoryId))
+                continue;
+
+            switch (categoryId.ValueKind)
+            {
+                case JsonValueKind.String:
+                    result.Add(categoryId.GetString()!);
+                    break;
+
+                case JsonValueKind.Number:
+                    result.Add(categoryId.GetRawText());
+                    break;
+
+                case JsonValueKind.Array:
+                    foreach (var item in categoryId.EnumerateArray())
+                        result.Add(item.GetString() ?? item.GetRawText());
+                    break;
+            }
+        }
+
+        return result;
+    }
+
+    private async Task DisableProductAsync(string sku)
+    {
+        var payload = new
+        {
+            product = new
+            {
+                sku = sku,
+                status = 2 // 2 = Disabled
+            }
+        };
+
+        var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}"
+        );
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        var response = await _http.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new Exception(body);
+        }
+    }
+
+
+    public async Task UpdateStockBulkAsync(List<InventoryItem> items)
+    {
+        using var semaphore = new SemaphoreSlim(MaxParallel);
+
+        var tasks = items.Select(async item =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                await UpdateQuantityAsync(item.Sku, item.Qty);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
 }

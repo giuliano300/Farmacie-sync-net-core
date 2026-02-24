@@ -7,4 +7,6 @@ public interface IResolvedProductRepository
     Task<List<ResolvedProduct>> GetByBatchAsync(string batchId);
 
     Task DeleteByBatchAsync(string batchId);
+
+    Task<ResolvedProduct> GetById(string id);
 }

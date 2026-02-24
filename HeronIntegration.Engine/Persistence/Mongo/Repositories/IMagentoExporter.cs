@@ -21,4 +21,10 @@ public interface IMagentoExporter
 
     Task RunMagentoCronAsync();
 
+    Task DisableProductsAsync(List<string> skus);
+
+    Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync();
+
+    Task UpdateStockBulkAsync(List<InventoryItem> items);
+
 }
