@@ -51,6 +51,38 @@ public class ExportRepository : IExportRepository
             update);
     }
 
+    public async Task ChangeStatusAsync(
+    string batchId,
+    List<ResolvedProduct> products,
+    ExportStatus status)
+    {
+        var aicList = products.Select(p => p.Aic).ToList();
+
+        var filter = Builders<ExportExecution>.Filter.And(
+            Builders<ExportExecution>.Filter.Eq(x => x.BatchId, ObjectId.Parse(batchId)),
+            Builders<ExportExecution>.Filter.In(x => x.Aic, aicList)
+        );
+
+        var update = Builders<ExportExecution>.Update
+            .Set(x => x.Status, status)
+            .Set(x => x.LastAttemptAt, DateTime.UtcNow)
+            .Inc(x => x.AttemptCount, 1);
+
+        await _context.ExportExecutions.UpdateManyAsync(filter, update);
+    }
+
+    public async Task SetStatusAsync(string batchId, string aic, ExportStatus status)
+    {
+        var update = Builders<ExportExecution>.Update
+            .Set(x => x.Status, status)
+            .Set(x => x.LastAttemptAt, DateTime.UtcNow)
+            .Inc(x => x.AttemptCount, 1);
+
+        await _context.ExportExecutions.UpdateOneAsync(
+            x => x.BatchId == ObjectId.Parse(batchId) && x.Aic == aic, 
+            update);
+    }
+
     public async Task SetErrorAsync(string id, string aic, string error)
     {
         var update = Builders<ExportExecution>.Update

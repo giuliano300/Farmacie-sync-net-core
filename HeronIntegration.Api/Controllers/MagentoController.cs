@@ -1,20 +1,21 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Repositories;
-using HeronIntegration.Engine.Steps;
+﻿using HeronIntegration.Engine.External.Farmadati.Enrichment;
+using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
+using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
 
-public class MagentoExportStepProcessor : IStepProcessor
+[ApiController]
+[Route("api/Magento")]
+public class MagentoController : ControllerBase
 {
-    public string Step => "Magento";
-
     private readonly IResolvedProductRepository _resolvedRepo;
     private readonly IExportRepository _exportRepo;
     private readonly IMagentoExporter _exporter;
     private readonly IBatchFinalizerService _batchFinalizer;
 
-    public MagentoExportStepProcessor(
-        IResolvedProductRepository resolvedRepo,
+    public MagentoController(IResolvedProductRepository resolvedRepo,
         IExportRepository exportRepo,
         IMagentoExporter exporter,
         IBatchFinalizerService batchFinalizer)
@@ -25,7 +26,8 @@ public class MagentoExportStepProcessor : IStepProcessor
         _batchFinalizer = batchFinalizer;
     }
 
-    public async Task<StepExecutionResult> ExecuteAsync(string batchId)
+    [HttpGet("")]
+    public async Task<StepExecutionResult> MassiveImport(string batchId)
     {
         var result = new StepExecutionResult
         {
@@ -144,14 +146,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             // =====================================================
             //  UPDATE STOCK
             // =====================================================
-            await _exporter.UpdateStockBulkAsync(
-                mappedList.Select(p => new InventoryItem
-                {
-                    Id = batchId,
-                    Sku = p.Aic,
-                    Qty = p.Availability
-                })
-                .ToList());
+            await UpdateStockBulkAsync(batchId);
 
             // =====================================================
             // DISABILITAZIONE PRODOTTI MANCANTI
@@ -186,6 +181,64 @@ public class MagentoExportStepProcessor : IStepProcessor
         }
 
         result.FinishedAt = DateTime.UtcNow;
+        return result;
+    }
+
+
+    [HttpGet("updateStockBulk")]
+    public async Task<StepExecutionResult> UpdateStockBulkAsync(string batchId)
+    {
+        var result = new StepExecutionResult
+        {
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            var inventory = await _resolvedRepo.GetByBatchAsync(batchId);
+            var list = inventory.Select(p => new InventoryItem
+            {
+                Id = batchId,
+                Sku = p.Aic,
+                Qty = p.Availability
+            }).ToList();
+
+            await _exporter.UpdateStockBulkAsync(list);
+
+        }
+        catch (Exception e)
+        {
+            result.Success = false;
+            result.ErrorMessage = e.Message;
+        }
+
+        result.FinishedAt = DateTime.UtcNow;
+
+        return result;
+    }
+
+    [HttpGet("updateImageBulk")]
+    public async Task<StepExecutionResult> UpdateImageBulkAsync(string batchId)
+    {
+        var result = new StepExecutionResult
+        {
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            var list = await _resolvedRepo.GetByBatchAsync(batchId);
+            await _exporter.UpdateImageBulkAsync(list);
+
+        }
+        catch (Exception e)
+        {
+            result.Success = false;
+            result.ErrorMessage = e.Message;
+        }
+
+        result.FinishedAt = DateTime.UtcNow;
+
         return result;
     }
 }

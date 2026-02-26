@@ -1,31 +1,37 @@
 ﻿using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using MongoDB.Bson.IO;
 using Renci.SshNet;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 
 public class MagentoExporter : IMagentoExporter
 {
     private readonly HttpClient _http;
     private readonly IConfiguration _config;
     private readonly ImageStorageService _imageStorage;
+    private readonly IExportRepository _exportRepo;
+
 
     private const int MaxParallel = 15;
 
     public MagentoExporter(
         HttpClient http,
         IConfiguration config,
-        ImageStorageService imageStorage)
+        ImageStorageService imageStorage,
+        IExportRepository exportRepo)
     {
         _http = http;
         _config = config;
         _imageStorage = imageStorage;
 
         _http.Timeout = TimeSpan.FromMinutes(10);
+        _exportRepo = exportRepo;
     }
 
     // =====================================================
@@ -124,6 +130,9 @@ public class MagentoExporter : IMagentoExporter
 
         try
         {
+            // Cancella immagini esistenti
+            await DeleteExistingImagesAsync(p.Aic);
+
             if (p.Images == null || !p.Images.Any())
             {
                 result.Success = true;
@@ -176,6 +185,8 @@ public class MagentoExporter : IMagentoExporter
 
                 await SendAsync(request);
             }
+
+            await _exportRepo.SetStatusAsync(p.BatchId.ToString(), p.Aic, ExportStatus.InsertImages);
 
             result.Success = true;
         }
@@ -235,7 +246,7 @@ public class MagentoExporter : IMagentoExporter
         };
     }
 
-    private async Task UpdateQuantityAsync(string sku, int qty)
+    private async Task UpdateQuantityAsync(string batchId, string sku, int qty)
     {
         var payload = new
         {
@@ -265,6 +276,8 @@ public class MagentoExporter : IMagentoExporter
         var j = JsonSerializer.Serialize(payload);
 
         var response = await _http.SendAsync(req);
+
+        await _exportRepo.SetStatusAsync(batchId, sku, ExportStatus.UpdatePrice);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -371,23 +384,30 @@ public class MagentoExporter : IMagentoExporter
 
     public async Task RunMagentoCronAsync()
     {
-        var host = _config["Magento:FtpHost"];
-        var user = _config["Magento:FtpUser"];
-        var password = _config["Magento:FtpPassword"];
+        try
+        {
+            var host = _config["Magento:FtpHost"];
+            var user = _config["Magento:FtpUser"];
+            var password = _config["Magento:FtpPassword"];
 
-        using var client = new SshClient(host, user, password);
+            using var client = new SshClient(host, user, password);
 
-        client.Connect();
+            client.Connect();
 
-        if (!client.IsConnected)
-            throw new Exception("Connessione SSH fallita.");
+            if (!client.IsConnected)
+                throw new Exception("Connessione SSH fallita.");
 
-        // Eseguiamo cron 2 volte (Magento lo richiede)
-        client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
-        await Task.Delay(20000);
-        client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
+            // Eseguiamo cron 2 volte (Magento lo richiede)
+            client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
+            await Task.Delay(20000);
+            client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
 
-        client.Disconnect();
+            client.Disconnect();
+        }
+        catch(Exception e)
+        {
+            Console.WriteLine(e.Message);
+        }
     }
 
 
@@ -459,7 +479,6 @@ public class MagentoExporter : IMagentoExporter
         return result;
     }
 
-
     public async Task DisableProductsAsync(List<string> skus)
     {
         if (skus == null || skus.Count == 0)
@@ -488,7 +507,6 @@ public class MagentoExporter : IMagentoExporter
 
         await Task.WhenAll(tasks);
     }
-
 
     private static List<string> ExtractCategories(JsonElement extensionAttributes)
     {
@@ -563,7 +581,6 @@ public class MagentoExporter : IMagentoExporter
         }
     }
 
-
     public async Task UpdateStockBulkAsync(List<InventoryItem> items)
     {
         using var semaphore = new SemaphoreSlim(MaxParallel);
@@ -573,7 +590,7 @@ public class MagentoExporter : IMagentoExporter
             await semaphore.WaitAsync();
             try
             {
-                await UpdateQuantityAsync(item.Sku, item.Qty);
+                await UpdateQuantityAsync(item.Id, item.Sku, item.Qty);
             }
             finally
             {
@@ -583,4 +600,138 @@ public class MagentoExporter : IMagentoExporter
 
         await Task.WhenAll(tasks);
     }
+
+    public async Task UpdateImageBulkAsync(List<ResolvedProduct> items)
+    {
+        using var semaphore = new SemaphoreSlim(MaxParallel);
+
+        var tasks = items.Select(async p =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                await UploadImagesAsync(p);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task DeleteExistingImagesAsync(string sku)
+    {
+        var getRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}/media"
+        );
+
+        getRequest.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+
+        var response = await _http.SendAsync(getRequest);
+
+        var content = await response.Content.ReadAsStringAsync();
+
+        var mediaEntries = JsonSerializer.Deserialize<List<MagentoMediaEntry>>(content);
+
+        if (mediaEntries == null || !mediaEntries.Any())
+            return;
+
+        foreach (var entry in mediaEntries)
+        {
+            var deleteRequest = new HttpRequestMessage(
+                HttpMethod.Delete,
+                $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}/media/{entry.id}"
+            );
+
+            deleteRequest.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+
+            await SendAsync(deleteRequest);
+        }
+    }
+
+    public async Task<MagentoMetadata> GetMagentoMetadataAsync()
+    {
+        // =====================================================
+        // CARICAMENTO METADATI MAGENTO
+        // =====================================================
+        var manufacturersTask = GetAttributeOptionsAsync("manufacturer");
+        var suppliersTask = GetAttributeOptionsAsync("supplier");
+        var categoriesTask = GetCategoryMapAsync();
+        var magentoProductsTask = GetMagentoProductsSlimAsync();
+
+        await Task.WhenAll(
+            manufacturersTask,
+            suppliersTask,
+            categoriesTask,
+            magentoProductsTask
+        );
+
+        var manufacturers = manufacturersTask.Result
+            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+            .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.First().Value,
+                StringComparer.OrdinalIgnoreCase
+            );
+
+        var suppliers = suppliersTask.Result
+            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+            .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.First().Value,
+                StringComparer.OrdinalIgnoreCase
+            );
+
+        var categories = categoriesTask.Result
+            .Where(x => !string.IsNullOrWhiteSpace(x.Key))
+            .GroupBy(x => x.Key.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.First().Value,
+                StringComparer.OrdinalIgnoreCase
+            );
+
+        var magentoProducts = magentoProductsTask.Result;
+
+
+        return new MagentoMetadata()
+        {
+            manufacturers = manufacturers,
+            suppliers = suppliers,
+            categories = categories,
+            magentoProducts = magentoProducts
+        };
+    }
+
+    public int? ResolveCategoryId(
+        Dictionary<string, int> categoryMap,
+        string categoryName)
+            {
+                var match = categoryMap
+                    .FirstOrDefault(x =>
+                        x.Key.EndsWith("/" + categoryName, StringComparison.OrdinalIgnoreCase)
+                    );
+
+                if (match.Equals(default(KeyValuePair<string, int>)))
+                {
+                    var matchNoCat = categoryMap
+                        .FirstOrDefault(x =>
+                            x.Key.EndsWith("/da smistare", StringComparison.OrdinalIgnoreCase)
+                        );
+                    if (matchNoCat.Equals(default(KeyValuePair<string, int>)))
+                        return null;
+                    return matchNoCat.Value;
+                }
+                return match.Value;
+            }
+
+
+
 }

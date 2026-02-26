@@ -1,5 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
+using MongoDB.Bson;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -20,5 +22,9 @@ public interface IExportRepository
     Task ResetSingleAsync(string batchId, string aic);
     Task ResetBatchAsync(string batchId);
     Task<BatchReport> BuildBatchReportAsync(string batchId);
+
+    Task ChangeStatusAsync(string batchId, List<ResolvedProduct> products, ExportStatus status);
+
+    Task SetStatusAsync(string batchId, string aic, ExportStatus status);
 
 }

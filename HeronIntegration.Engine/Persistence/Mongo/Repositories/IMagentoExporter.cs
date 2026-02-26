@@ -26,5 +26,10 @@ public interface IMagentoExporter
     Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync();
 
     Task UpdateStockBulkAsync(List<InventoryItem> items);
+    Task UpdateImageBulkAsync(List<ResolvedProduct> items);
+
+   Task<MagentoMetadata> GetMagentoMetadataAsync();
+
+    int? ResolveCategoryId(Dictionary<string, int> categoryMap, string categoryName);
 
 }

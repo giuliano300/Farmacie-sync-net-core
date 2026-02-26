@@ -3,6 +3,9 @@
 public enum ExportStatus
 {
     Pending,
+    Insert,
+    UpdatePrice,
+    InsertImages,
     Success,
     Error
 }
