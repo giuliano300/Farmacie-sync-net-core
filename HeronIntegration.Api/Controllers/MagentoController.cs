@@ -1,4 +1,5 @@
 ﻿using HeronIntegration.Engine.External.Farmadati.Enrichment;
+using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
@@ -12,18 +13,25 @@ public class MagentoController : ControllerBase
 {
     private readonly IResolvedProductRepository _resolvedRepo;
     private readonly IExportRepository _exportRepo;
-    private readonly IMagentoExporter _exporter;
+    private readonly IMagentoExporterFactory _magentoExporterFactory;
     private readonly IBatchFinalizerService _batchFinalizer;
+    private readonly ICustomerRepository _customerRepo;
+    private readonly IBatchRepository _batchRepo;
 
-    public MagentoController(IResolvedProductRepository resolvedRepo,
+    public MagentoController(
+        IResolvedProductRepository resolvedRepo,
         IExportRepository exportRepo,
-        IMagentoExporter exporter,
+        IMagentoExporterFactory magentoExporterFactory,
+        IBatchRepository batchRepo,
+        ICustomerRepository customerRepo,
         IBatchFinalizerService batchFinalizer)
     {
         _resolvedRepo = resolvedRepo;
         _exportRepo = exportRepo;
-        _exporter = exporter;
+        _customerRepo = customerRepo;
+        _magentoExporterFactory = magentoExporterFactory;
         _batchFinalizer = batchFinalizer;
+        _batchRepo = batchRepo;
     }
 
     [HttpGet("")]
@@ -36,6 +44,15 @@ public class MagentoController : ControllerBase
 
         try
         {
+            //CARICAMENTO DATI CUSTOMER
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+
             // =====================================================
             // CARICAMENTO METADATI MAGENTO
             // =====================================================
@@ -188,6 +205,7 @@ public class MagentoController : ControllerBase
     [HttpGet("updateStockBulk")]
     public async Task<StepExecutionResult> UpdateStockBulkAsync(string batchId)
     {
+
         var result = new StepExecutionResult
         {
             StartedAt = DateTime.UtcNow
@@ -195,6 +213,14 @@ public class MagentoController : ControllerBase
 
         try
         {
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+
             var inventory = await _resolvedRepo.GetByBatchAsync(batchId);
             var list = inventory.Select(p => new InventoryItem
             {
@@ -204,6 +230,7 @@ public class MagentoController : ControllerBase
             }).ToList();
 
             await _exporter.UpdateStockBulkAsync(list);
+            await _exporter.RunMagentoCronAsync();
 
         }
         catch (Exception e)
@@ -227,8 +254,17 @@ public class MagentoController : ControllerBase
 
         try
         {
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+
             var list = await _resolvedRepo.GetByBatchAsync(batchId);
             await _exporter.UpdateImageBulkAsync(list);
+            await _exporter.RunMagentoCronAsync();
 
         }
         catch (Exception e)
@@ -241,4 +277,68 @@ public class MagentoController : ControllerBase
 
         return result;
     }
+
+    [HttpGet("runMagentoCronAsync")]
+    public async Task<StepExecutionResult> RunMagentoCronAsync(string batchId)
+    {
+        var result = new StepExecutionResult
+        {
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+
+            await _exporter.RunMagentoCronAsync();
+
+        }
+        catch (Exception e)
+        {
+            result.Success = false;
+            result.ErrorMessage = e.Message;
+        }
+
+        result.FinishedAt = DateTime.UtcNow;
+
+        return result;
+    }
+
+    [HttpGet("finalizeBatchAsync")]
+    public async Task<StepExecutionResult> FinalizeBatchAsync(string batchId)
+    {
+        var result = new StepExecutionResult
+        {
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+
+            await _batchFinalizer.FinalizeBatchAsync(batchId);
+        }
+        catch (Exception e)
+        {
+            result.Success = false;
+            result.ErrorMessage = e.Message;
+        }
+
+        result.FinishedAt = DateTime.UtcNow;
+
+        return result;
+    }
+
 }

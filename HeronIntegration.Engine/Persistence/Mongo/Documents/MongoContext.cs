@@ -52,6 +52,8 @@ public class MongoContext
     public IMongoCollection<ManagementCache> ManagementCaches =>
     _database.GetCollection<ManagementCache>("management_cache");
 
+    public IMongoCollection<Administrator> Administrators =>
+    _database.GetCollection<Administrator>("administrator");
 
     public IMongoCollection<BatchReport> BatchReports =>
     _database.GetCollection<BatchReport>("batch_report");

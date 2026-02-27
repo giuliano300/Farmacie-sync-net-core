@@ -13,25 +13,26 @@ using System.Threading;
 public class MagentoExporter : IMagentoExporter
 {
     private readonly HttpClient _http;
-    private readonly IConfiguration _config;
     private readonly ImageStorageService _imageStorage;
     private readonly IExportRepository _exportRepo;
-
+    private readonly MagentoConfig _magento;
+    private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
 
     private const int MaxParallel = 15;
 
     public MagentoExporter(
         HttpClient http,
-        IConfiguration config,
         ImageStorageService imageStorage,
-        IExportRepository exportRepo)
+        IExportRepository exportRepo,
+        MagentoConfig magento)
     {
         _http = http;
-        _config = config;
         _imageStorage = imageStorage;
 
         _http.Timeout = TimeSpan.FromMinutes(10);
         _exportRepo = exportRepo;
+        _magento = magento;
+
     }
 
     // =====================================================
@@ -90,11 +91,11 @@ public class MagentoExporter : IMagentoExporter
 
         var request = new HttpRequestMessage(
             HttpMethod.Put,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{p.Aic}"
+            $"{BaseUrl}/rest/V1/products/{p.Aic}"
         );
 
         request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
 
         request.Content = new StringContent(
             JsonSerializer.Serialize(payload),
@@ -171,11 +172,11 @@ public class MagentoExporter : IMagentoExporter
 
                 var request = new HttpRequestMessage(
                     HttpMethod.Post,
-                    $"{_config["Magento:BaseUrl"]}/rest/V1/products/{p.Aic}/media"
+                    $"{BaseUrl}/rest/V1/products/{p.Aic}/media"
                 );
 
                 request.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+                    new AuthenticationHeaderValue("Bearer", _magento.Token);
 
                 request.Content = new StringContent(
                     JsonSerializer.Serialize(payload),
@@ -261,11 +262,11 @@ public class MagentoExporter : IMagentoExporter
 
         var req = new HttpRequestMessage(
             HttpMethod.Put,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}/stockItems/1"
+            $"{BaseUrl}/rest/V1/products/{sku}/stockItems/1"
         );
 
         req.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
 
         req.Content = new StringContent(
             JsonSerializer.Serialize(payload),
@@ -273,7 +274,7 @@ public class MagentoExporter : IMagentoExporter
             "application/json"
         );
 
-        var j = JsonSerializer.Serialize(payload);
+        //var j = JsonSerializer.Serialize(payload);
 
         var response = await _http.SendAsync(req);
 
@@ -303,12 +304,12 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode)
     {
-        var url = $"{_config["Magento:BaseUrl"]}/rest/V1/products/attributes/{attributeCode}/options";
+        var url = $"{BaseUrl}/rest/V1/products/attributes/{attributeCode}/options";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
 
         request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
 
         var response = await _http.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
@@ -335,11 +336,11 @@ public class MagentoExporter : IMagentoExporter
     {
         var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/categories"
+            $"{BaseUrl}/rest/V1/categories"
         );
 
         request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
 
         var response = await _http.SendAsync(request);
         var json = await response.Content.ReadAsStringAsync();
@@ -386,21 +387,34 @@ public class MagentoExporter : IMagentoExporter
     {
         try
         {
-            var host = _config["Magento:FtpHost"];
-            var user = _config["Magento:FtpUser"];
-            var password = _config["Magento:FtpPassword"];
+            if (string.IsNullOrWhiteSpace(_magento.FtpHost))
+                throw new Exception("FtpHost non configurato per il customer");
 
-            using var client = new SshClient(host, user, password);
+            using var client = new SshClient(
+                _magento.FtpHost,
+                _magento.FtpUser,
+                _magento.FtpPassword
+            );
 
             client.Connect();
 
             if (!client.IsConnected)
-                throw new Exception("Connessione SSH fallita.");
+                throw new Exception("Connessione SSH fallita");
 
-            // Eseguiamo cron 2 volte (Magento lo richiede)
-            client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
+            var commandText = $"php {_magento.MagentoRootPath}/bin/magento cron:run";
+
+            // Magento richiede 2 esecuzioni
+            var result1 = client.RunCommand(commandText);
+
+            if (!string.IsNullOrWhiteSpace(result1.Error))
+                throw new Exception(result1.Error);
+
             await Task.Delay(20000);
-            client.RunCommand("php /var/www/vhosts/upfarma.plumadev.com/httpdocs/bin/magento cron:run");
+
+            var result2 = client.RunCommand(commandText);
+
+            if (!string.IsNullOrWhiteSpace(result2.Error))
+                throw new Exception(result2.Error);
 
             client.Disconnect();
         }
@@ -424,14 +438,14 @@ public class MagentoExporter : IMagentoExporter
             do
             {
                 var url =
-                    $"{_config["Magento:BaseUrl"]}/rest/V1/products?" +
+                    $"{BaseUrl}/rest/V1/products?" +
                     $"searchCriteria[currentPage]={page}&" +
                     $"searchCriteria[pageSize]={pageSize}&" +
                     $"fields=items[sku,price,custom_attributes[attribute_code,value],extension_attributes[category_links[category_id]]],total_count";
 
                 var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+                    new AuthenticationHeaderValue("Bearer", _magento.Token);
 
                 var response = await _http.SendAsync(request);
                 var json = await response.Content.ReadAsStringAsync();
@@ -560,11 +574,11 @@ public class MagentoExporter : IMagentoExporter
 
         var request = new HttpRequestMessage(
             HttpMethod.Put,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}"
+            $"{BaseUrl}/rest/V1/products/{sku}"
         );
 
         request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
 
         request.Content = new StringContent(
             JsonSerializer.Serialize(payload),
@@ -625,11 +639,11 @@ public class MagentoExporter : IMagentoExporter
     {
         var getRequest = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}/media"
+            $"{BaseUrl}/rest/V1/products/{sku}/media"
         );
 
         getRequest.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
 
         var response = await _http.SendAsync(getRequest);
 
@@ -644,11 +658,11 @@ public class MagentoExporter : IMagentoExporter
         {
             var deleteRequest = new HttpRequestMessage(
                 HttpMethod.Delete,
-                $"{_config["Magento:BaseUrl"]}/rest/V1/products/{sku}/media/{entry.id}"
+                $"{BaseUrl}/rest/V1/products/{sku}/media/{entry.id}"
             );
 
             deleteRequest.Headers.Authorization =
-                new AuthenticationHeaderValue("Bearer", _config["Magento:Token"]);
+                new AuthenticationHeaderValue("Bearer", _magento.Token);
 
             await SendAsync(deleteRequest);
         }

@@ -89,8 +89,6 @@ builder.Services.AddScoped<ISupplierStockRepository, SupplierStockRepository>();
 
 builder.Services.AddHostedService<SupplierFileImporterWorker>();
 
-builder.Services.AddHttpClient<IMagentoExporter, MagentoExporter>();
-
 builder.Services.AddScoped<IStepProcessor, HeronImportStepProcessor>();
 builder.Services.AddScoped<IStepProcessor, FarmadatiEnrichmentStepProcessor>();
 builder.Services.AddScoped<IStepProcessor, SupplierResolutionStepProcessor>();
@@ -120,10 +118,14 @@ builder.Services.AddScoped<ISupplierParser, HeringParser>();
 
 builder.Services.AddScoped<IManagementCacheRepository, ManagementCacheRepository>();
 builder.Services.AddScoped<IBatchReportRepository, BatchReportRepository>();
+builder.Services.AddScoped<IAdministratorRepository, AdministratorRepository>();
 
 builder.Services.AddScoped<IBatchFinalizerService, BatchFinalizerService>();
 builder.Services.AddScoped<IBatchReportService, BatchReportService>();
 builder.Services.AddScoped<ICleanupService, CleanupService>();
+
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IMagentoExporterFactory, MagentoExporterFactory>();
 
 
 var host = builder.Build();

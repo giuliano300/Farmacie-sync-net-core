@@ -1,4 +1,5 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Repositories;
+﻿using HeronIntegration.Engine.Persistence.Mongo;
+using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
@@ -10,19 +11,26 @@ public class MagentoExportStepProcessor : IStepProcessor
 
     private readonly IResolvedProductRepository _resolvedRepo;
     private readonly IExportRepository _exportRepo;
-    private readonly IMagentoExporter _exporter;
+    private readonly IBatchRepository _batchRepo;
+    private readonly ICustomerRepository _customerRepo;
     private readonly IBatchFinalizerService _batchFinalizer;
+    private readonly IMagentoExporterFactory _magentoExporterFactory;
 
     public MagentoExportStepProcessor(
         IResolvedProductRepository resolvedRepo,
         IExportRepository exportRepo,
-        IMagentoExporter exporter,
-        IBatchFinalizerService batchFinalizer)
+        IBatchFinalizerService batchFinalizer,
+        IBatchRepository batchRepo,
+        ICustomerRepository customerRepo,
+        IMagentoExporterFactory magentoExporterFactory
+        )
     {
         _resolvedRepo = resolvedRepo;
         _exportRepo = exportRepo;
-        _exporter = exporter;
         _batchFinalizer = batchFinalizer;
+        _batchRepo = batchRepo;
+        _customerRepo = customerRepo;
+        _magentoExporterFactory = magentoExporterFactory;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -34,6 +42,16 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         try
         {
+            //CARICAMENTO DATI CUSTOMER
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+
+
             // =====================================================
             // CARICAMENTO METADATI MAGENTO
             // =====================================================

@@ -42,7 +42,6 @@ builder.Services.AddScoped<IResolvedProductRepository, ResolvedProductRepository
 
 // HTTP
 builder.Services.AddHttpClient();
-builder.Services.AddHttpClient<IMagentoExporter, MagentoExporter>();
 
 builder.Services.AddScoped<FarmadatiSoapClient>();
 
@@ -146,13 +145,30 @@ builder.Services.AddScoped<ISupplierParser, HeringParser>();
 builder.Services.AddScoped<IManagementCacheRepository, ManagementCacheRepository>();
 
 builder.Services.AddScoped<IBatchReportRepository, BatchReportRepository>();
+builder.Services.AddScoped<IAdministratorRepository, AdministratorRepository>();
 
 builder.Services.AddScoped<IBatchFinalizerService, BatchFinalizerService>();
 builder.Services.AddScoped<IBatchReportService, BatchReportService>();
 builder.Services.AddScoped<ICleanupService, CleanupService>();
 
+builder.Services.AddScoped<IMagentoExporterFactory, MagentoExporterFactory>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("OpenCors",
+        policy =>
+        {
+            policy
+                .AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        });
+});
+
 var app = builder.Build();
 
 app.MapControllers();
+
+app.UseCors("OpenCors");
 
 app.Run();
