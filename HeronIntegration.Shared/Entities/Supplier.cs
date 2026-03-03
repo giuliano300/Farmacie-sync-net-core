@@ -6,7 +6,8 @@ namespace HeronIntegration.Shared.Entities;
 public class Supplier
 {
     [BsonId]
-    public ObjectId Id { get; set; }
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string Id { get; set; }
 
     public string Code { get; set; } = default!;
 
@@ -23,4 +24,5 @@ public class Supplier
     public int Priority { get; set; }
 
     public bool Active { get; set; } = true;
+    public DateOnly? LastUpdate { get; set; } = null;
 }

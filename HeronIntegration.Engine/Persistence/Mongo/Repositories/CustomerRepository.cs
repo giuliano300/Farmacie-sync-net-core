@@ -29,11 +29,11 @@ public class CustomerRepository : ICustomerRepository
     => await _context.Customers.Find(_ => true).ToListAsync();
 
     public async Task<Customer?> GetByIdAsync(string id)
-        => await _context.Customers.Find(x => x.Id == ObjectId.Parse(id)).FirstOrDefaultAsync();
+        => await _context.Customers.Find(x => x.Id == id).FirstOrDefaultAsync();
 
     public async Task UpdateAsync(Customer customer)
         => await _context.Customers.ReplaceOneAsync(x => x.Id == customer.Id, customer);
 
     public async Task DeleteAsync(string id)
-        => await _context.Customers.DeleteOneAsync(x => x.Id == ObjectId.Parse(id));
+        => await _context.Customers.DeleteOneAsync(x => x.Id == id);
 }

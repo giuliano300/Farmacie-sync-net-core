@@ -25,23 +25,37 @@ public class CustomersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(Customer customer)
     {
-        customer.Id = ObjectId.GenerateNewId();
+        customer.Id = ObjectId.GenerateNewId().ToString();
         await _repo.InsertAsync(customer);
         return Ok(customer);
     }
 
     [HttpPut("{id}")]
-    public async Task<IActionResult> Update(string id, Customer customer)
+    public async Task<bool> Update(string id, Customer customer)
     {
-        customer.Id = ObjectId.Parse(id);
-        await _repo.UpdateAsync(customer);
-        return Ok();
+        try
+        {
+            customer.Id = id;
+            await _repo.UpdateAsync(customer);
+            return true;
+        }
+        catch(Exception e)
+        {
+            return false;
+        }
     }
 
     [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete(string id)
+    public async Task<bool> Delete(string id)
     {
-        await _repo.DeleteAsync(id);
-        return Ok();
+        try
+        {
+            await _repo.DeleteAsync(id);
+            return true;
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
     }
 }

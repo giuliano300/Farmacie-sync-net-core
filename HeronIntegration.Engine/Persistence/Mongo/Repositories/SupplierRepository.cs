@@ -29,12 +29,12 @@ public class SupplierRepository : ISupplierRepository
         => await _context.Suppliers.Find(_ => true).ToListAsync();
 
     public async Task<Supplier?> GetByIdAsync(string id)
-        => await _context.Suppliers.Find(x => x.Id == ObjectId.Parse(id)).FirstOrDefaultAsync();
+        => await _context.Suppliers.Find(x => x.Id == id).FirstOrDefaultAsync();
 
     public async Task UpdateAsync(Supplier supplier)
         => await _context.Suppliers.ReplaceOneAsync(x => x.Id == supplier.Id, supplier);
 
     public async Task DeleteAsync(string id)
-        => await _context.Suppliers.DeleteOneAsync(x => x.Id == ObjectId.Parse(id));
+        => await _context.Suppliers.DeleteOneAsync(x => x.Id == id);
 
 }

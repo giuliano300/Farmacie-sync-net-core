@@ -25,23 +25,37 @@ public class SuppliersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(Supplier supplier)
     {
-        supplier.Id = ObjectId.GenerateNewId();
+        supplier.Id = ObjectId.GenerateNewId().ToString();
         await _repo.InsertAsync(supplier);
         return Ok(supplier);
     }
 
     [HttpPut("{id}")]
-    public async Task<IActionResult> Update(string id, Supplier supplier)
+    public async Task<bool> Update(string id, Supplier supplier)
     {
-        supplier.Id = ObjectId.Parse(id);
-        await _repo.UpdateAsync(supplier);
-        return Ok();
+        try
+        {
+            supplier.Id = id;
+            await _repo.UpdateAsync(supplier);
+            return true;
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
     }
 
     [HttpDelete("{id}")]
-    public async Task<IActionResult> Delete(string id)
+    public async Task<bool> Delete(string id)
     {
-        await _repo.DeleteAsync(id);
-        return Ok();
+        try
+        {
+            await _repo.DeleteAsync(id);
+            return true;
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
     }
 }
