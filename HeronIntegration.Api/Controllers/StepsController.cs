@@ -37,6 +37,8 @@ public class StepsController : ControllerBase
         if (step.Status == Shared.Enums.StepStatus.Success)
             throw new Exception($"Step già lavorato {req.Step}");
 
+        await _stepRepo.SetRunningAsync(step.Id.ToString());
+
         var processor = _resolver.Resolve(req.Step);
 
         var result = await processor.ExecuteAsync(req.BatchId);

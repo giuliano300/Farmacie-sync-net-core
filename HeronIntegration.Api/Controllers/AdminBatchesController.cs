@@ -1,5 +1,6 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
+using HeronIntegration.Engine.StepProcessors;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
@@ -13,13 +14,32 @@ public class BatchController : ControllerBase
 {
     private readonly IBatchRepository _batchRepo;
     private readonly IStepRepository _stepRepo;
+    private readonly ICustomerRepository _customerRepo;
+    private readonly IHostEnvironment _env;
+    private readonly HeronImportStepProcessor _heronProcessor;
+    private readonly FarmadatiEnrichmentStepProcessor _farmadatiProcessor;
+    private readonly SupplierResolutionStepProcessor _supplierProcessor;
+    private readonly MagentoExportStepProcessor _magentoProcessor;
 
     public BatchController(
         IBatchRepository batchRepo,
-        IStepRepository stepRepo)
+        IStepRepository stepRepo,
+        IHostEnvironment env,
+        ICustomerRepository customerRepo, 
+        HeronImportStepProcessor heronProcessor,
+        FarmadatiEnrichmentStepProcessor farmadatiProcessor,
+        SupplierResolutionStepProcessor supplierProcessor,
+        MagentoExportStepProcessor magentoProcessor
+        )
     {
         _batchRepo = batchRepo;
         _stepRepo = stepRepo;
+        _env = env;
+        _customerRepo = customerRepo;
+        _heronProcessor = heronProcessor;
+        _farmadatiProcessor = farmadatiProcessor;
+        _supplierProcessor = supplierProcessor;
+        _magentoProcessor = magentoProcessor;
     }
 
     [HttpGet]
@@ -31,34 +51,144 @@ public class BatchController : ControllerBase
         => Ok(await _stepRepo.GetByBatchAsync(batchId));
 
     [HttpPost("create")]
-    public async Task<IActionResult> Create(CreateBatchRequest req)
+    public async Task<ActionResult> Create(string customerId)
     {
-        var seq = await _batchRepo.GetNextSequenceAsync(req.CustomerId);
-        var batch = new BatchExecution
+        try
         {
-            Id = ObjectId.GenerateNewId(),
-            CustomerId = req.CustomerId,
-            SequenceNumber = seq,
-            StartedAt = DateTime.UtcNow,
-            Status = BatchStatus.Running,
-            TriggeredBy = "Admin",
-            HeronFileName = Path.GetFileName(req.HeronFilePath),
-            HeronFilePath = req.HeronFilePath
-        };
+            var customer = await _customerRepo.GetByIdAsync(customerId);
+            if (customer == null)
+                return NotFound();
+        
+            var root = _env.ContentRootPath;
+            var parent = Directory.GetParent(root)!.FullName;
 
-        var batchId = await _batchRepo.CreateAsync(batch);
+            var folder = Path.Combine(
+                parent,
+                "HeronFolder",
+                customer.HeronFolder
+            );
+            if (!Directory.Exists(folder))
+                return NotFound(); 
 
-        await _stepRepo.CreateDefaultStepsAsync(batchId, req.CustomerId);
+            var pathFile = Directory.GetFiles(folder).FirstOrDefault();
+            if (pathFile == null)
+                return NotFound();
 
-        return Ok(batchId);
+            var seq = await _batchRepo.GetNextSequenceAsync(customerId);
+            var batch = new BatchExecution
+            {
+                Id = ObjectId.GenerateNewId(),
+                CustomerId = customerId,
+                SequenceNumber = seq,
+                StartedAt = DateTime.UtcNow,
+                Status = BatchStatus.Running,
+                TriggeredBy = "Admin",
+                HeronFileName = Path.GetFileName(pathFile),
+                HeronFilePath = pathFile
+            };
+
+            var batchId = await _batchRepo.CreateAsync(batch);
+
+            await _stepRepo.CreateDefaultStepsAsync(batchId, customerId);
+
+            return Ok(new { batchId });
+        }
+        catch(Exception e)
+        {
+
+        }
+        return NotFound();
     }
 
-    [HttpPost("{batchId}/restart")]
-    public async Task<IActionResult> Restart(string batchId)
+    [HttpPost("{batchId}/{stepId}/restart")]
+    public async Task<bool> Restart(string batchId, string stepId)
     {
-        await _stepRepo.ResetStepsAsync(batchId);
-        await _batchRepo.SetRunningAsync(batchId);
+        try
+        {
+            await _stepRepo.ResetStepsAsync(batchId);
+            var step = await _stepRepo.GetByIdAsync(stepId);
+            switch (step!.Step.ToUpper())
+            {
+                case "HERONIMPORT":
+                    await _heronProcessor.ExecuteAsync(batchId);
+                    break;
+                case "FARMADATI":
+                    await _farmadatiProcessor.ExecuteAsync(batchId);
+                    break;
+                case "SUPPLIERS":
+                    await _supplierProcessor.ExecuteAsync(batchId);
+                    break;
+                case "MAGENTO":
+                    await _magentoProcessor.ExecuteAsync(batchId);
+                    break;
+            }
+            await _batchRepo.SetRunningAsync(batchId);
+            return true;
+        }
+        catch (Exception e)
+        {
 
-        return Ok();
+        }
+
+        return false;
+    }
+
+    [HttpPost("{batchId}/start")]
+    public async Task<bool> start(string batchId)
+    {
+        try
+        {
+            await _batchRepo.SetRunningAsync(batchId);
+            await _heronProcessor.ExecuteAsync(batchId);
+            return true;
+        }
+        catch(Exception e)
+        {
+
+        }
+
+        return false;
+    }
+
+    [HttpGet("status/{customerId}")]
+    public async Task<BatchStatusResponse> GetStatus(string customerId)
+    {
+        try
+        {
+            var runningBatch = await _batchRepo.GetRunningBatchAsync(customerId);
+
+            if (runningBatch == null)
+            {
+                return new BatchStatusResponse
+                {
+                    CanStartNewBatch = true
+                };
+            }
+
+            var steps = await _stepRepo.GetByBatchAsync(runningBatch.Id.ToString());
+
+            var currentStep = steps
+                .OrderByDescending(x => x.StartedAt)
+                .FirstOrDefault();
+
+            return new BatchStatusResponse
+            {
+                CanStartNewBatch = false,
+                RunningBatchId = runningBatch.Id.ToString(),
+                CurrentStep = currentStep?.Step,
+                StepStatus = currentStep?.Status
+            };
+        }
+        catch (Exception e)
+        {
+            return new BatchStatusResponse
+            {
+                CanStartNewBatch = false,
+                RunningBatchId = null,
+                CurrentStep = e.Message.ToString(),
+                StepStatus = null
+            };
+        }
+
     }
 }

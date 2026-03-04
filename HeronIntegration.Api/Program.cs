@@ -153,6 +153,11 @@ builder.Services.AddScoped<ICleanupService, CleanupService>();
 
 builder.Services.AddScoped<IMagentoExporterFactory, MagentoExporterFactory>();
 
+builder.Services.AddScoped<HeronImportStepProcessor>();
+builder.Services.AddScoped<FarmadatiEnrichmentStepProcessor>();
+builder.Services.AddScoped<SupplierResolutionStepProcessor>();
+builder.Services.AddScoped<MagentoExportStepProcessor>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("OpenCors",

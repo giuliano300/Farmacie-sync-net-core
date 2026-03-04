@@ -21,6 +21,13 @@ public class StepRepository : IStepRepository
             .ToListAsync();
     }
 
+    public async Task<StepExecution> GetByIdAsync(string id)
+    {
+        return await _context.StepExecutions
+            .Find(x => x.Id == ObjectId.Parse(id))
+            .FirstOrDefaultAsync();
+    }
+
     public async Task<StepExecution?> GetStepAsync(string batchId, string step)
     {
         return await _context.StepExecutions

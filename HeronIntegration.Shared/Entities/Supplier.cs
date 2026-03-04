@@ -24,5 +24,5 @@ public class Supplier
     public int Priority { get; set; }
 
     public bool Active { get; set; } = true;
-    public DateOnly? LastUpdate { get; set; } = null;
+    public DateTime? LastUpdate { get; set; } = null;
 }

@@ -87,4 +87,43 @@ public class BatchRepository : IBatchRepository
                 .Set(x => x.StartedAt, DateTime.UtcNow)
         );
     }
+
+    public async Task<StepExecution?> GetCurrentStepAsync(string batchId)
+    {
+        return await _context.StepExecutions
+            .Find(x => x.BatchId == ObjectId.Parse(batchId))
+            .SortByDescending(x => x.StartedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<bool> CanStartNextStepAsync(string batchId)
+    {
+        var lastStep = await _context.StepExecutions
+            .Find(x => x.BatchId == ObjectId.Parse(batchId))
+            .SortByDescending(x => x.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (lastStep == null)
+            return true;
+
+        return lastStep.Status == StepStatus.Success;
+    }
+
+    public async Task<(BatchExecution? batch, StepExecution? step)> GetRunningBatchWithStepAsync()
+    {
+        var batch = await _context.BatchExecutions
+            .Find(x => x.Status == BatchStatus.Running)
+            .SortByDescending(x => x.StartedAt)
+            .FirstOrDefaultAsync();
+
+        if (batch == null)
+            return (null, null);
+
+        var step = await _context.StepExecutions
+            .Find(x => x.BatchId == batch.Id)
+            .SortByDescending(x => x.StartedAt)
+            .FirstOrDefaultAsync();
+
+        return (batch, step);
+    }
 }

@@ -9,6 +9,5 @@ namespace HeronIntegration.Shared.Models
     public class CreateBatchRequest
     {
         public string CustomerId { get; set; } = default!;
-        public string HeronFilePath { get; set; } = default!;
     }
 }

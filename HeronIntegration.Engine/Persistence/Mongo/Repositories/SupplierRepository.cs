@@ -28,6 +28,13 @@ public class SupplierRepository : ISupplierRepository
     public async Task<List<Supplier>> GetAllAsync()
         => await _context.Suppliers.Find(_ => true).ToListAsync();
 
+    public async Task<Supplier> GetByCode(string code)
+    {
+        var filter = Builders<Supplier>.Filter.Eq(x => x.Code, code);
+
+        return await _context.Suppliers.Find(filter).FirstOrDefaultAsync();
+    }
+
     public async Task<Supplier?> GetByIdAsync(string id)
         => await _context.Suppliers.Find(x => x.Id == id).FirstOrDefaultAsync();
 
@@ -37,4 +44,13 @@ public class SupplierRepository : ISupplierRepository
     public async Task DeleteAsync(string id)
         => await _context.Suppliers.DeleteOneAsync(x => x.Id == id);
 
+    public async Task UpdateLastUpdate(string code)
+    {
+        var filter = Builders<Supplier>.Filter.Eq(x => x.Code, code);
+
+        var update = Builders<Supplier>.Update
+           .Set(x => x.LastUpdate, (DateTime?)DateTime.Now);
+
+        await _context.Suppliers.UpdateOneAsync(filter, update);
+    }
 }

@@ -20,4 +20,9 @@ public interface IBatchRepository
 
     Task SetRunningAsync(string batchId);
 
+    Task<bool> CanStartNextStepAsync(string batchId);
+
+    Task<(BatchExecution? batch, StepExecution? step)> GetRunningBatchWithStepAsync();
+
+    Task<StepExecution?> GetCurrentStepAsync(string batchId);
 }

@@ -7,6 +7,7 @@ public interface IStepRepository
     Task<List<StepExecution>> GetStepsAsync(string batchId);
 
     Task<StepExecution?> GetStepAsync(string batchId, string step);
+    Task<StepExecution?> GetByIdAsync(string stepId);
 
     Task CreateAsync(StepExecution step);
 

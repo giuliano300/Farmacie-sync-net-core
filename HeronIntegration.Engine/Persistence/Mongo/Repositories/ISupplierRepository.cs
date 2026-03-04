@@ -15,7 +15,9 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
         Task<List<Supplier>> GetAllAsync();
         Task<Supplier?> GetByIdAsync(string id);
         Task UpdateAsync(Supplier supplier);
+        Task UpdateLastUpdate(string code);
         Task DeleteAsync(string id);
 
+        Task<Supplier> GetByCode(string code);
     }
 }

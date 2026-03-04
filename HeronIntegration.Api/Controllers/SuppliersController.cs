@@ -8,10 +8,12 @@ using MongoDB.Bson;
 public class SuppliersController : ControllerBase
 {
     private readonly ISupplierRepository _repo;
+    private readonly SupplierStockProcessor _processor;
 
-    public SuppliersController(ISupplierRepository repo)
+    public SuppliersController(ISupplierRepository repo, SupplierStockProcessor processor)
     {
         _repo = repo;
+        _processor = processor;
     }
 
     [HttpGet]
@@ -21,6 +23,40 @@ public class SuppliersController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(string id)
         => Ok(await _repo.GetByIdAsync(id));
+
+    [HttpGet("byCode")]
+    public async Task<IActionResult> GetByCode(string code)
+        => Ok(await _repo.GetByCode(code));
+
+    [HttpGet("sync")]
+    public async Task<bool> sync(string code)
+    {
+        try
+        {
+            var fileName = await _processor.DownloadAsync(code);
+            if (fileName == null || fileName == "")
+            {
+                await _repo.UpdateLastUpdate(code);
+                 return false;
+            }
+
+           var res = await _processor.ImportAsync(code);
+            if (res)
+            {
+                await _repo.UpdateLastUpdate(code);
+                return true;
+            }
+
+
+            return false;
+
+        }
+        catch (Exception e)
+        {
+
+        }
+        return false;
+    }
 
     [HttpPost]
     public async Task<IActionResult> Create(Supplier supplier)
