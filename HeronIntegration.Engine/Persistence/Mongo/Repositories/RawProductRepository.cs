@@ -42,4 +42,10 @@ public class RawProductRepository : IRawProductRepository
         var filter = Builders<RawProduct>.Filter.Eq("BatchId", batchId);
         await _context.RawProducts.DeleteManyAsync(filter);
     }
+
+    public async Task<int> CountByBatchAsync(string batchId)
+    {
+        return (int)await _context.RawProducts
+            .CountDocumentsAsync(x => x.BatchId == ObjectId.Parse(batchId));
+    }
 }

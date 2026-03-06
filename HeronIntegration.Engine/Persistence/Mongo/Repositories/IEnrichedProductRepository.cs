@@ -16,4 +16,6 @@ public interface IEnrichedProductRepository
     Task<List<string>> GetAicsByBatchAsync(string batchId);
 
     Task DeleteByBatchAsync(string batchId);
+
+    Task<int> CountByBatchAsync(string batchId);
 }

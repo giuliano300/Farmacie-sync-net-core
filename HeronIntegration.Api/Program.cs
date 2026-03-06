@@ -152,7 +152,7 @@ builder.Services.AddScoped<IBatchReportService, BatchReportService>();
 builder.Services.AddScoped<ICleanupService, CleanupService>();
 
 builder.Services.AddScoped<IMagentoExporterFactory, MagentoExporterFactory>();
-
+builder.Services.AddScoped<SupplierStockProcessor>();
 builder.Services.AddScoped<HeronImportStepProcessor>();
 builder.Services.AddScoped<FarmadatiEnrichmentStepProcessor>();
 builder.Services.AddScoped<SupplierResolutionStepProcessor>();

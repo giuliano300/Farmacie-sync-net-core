@@ -25,4 +25,8 @@ public interface IBatchRepository
     Task<(BatchExecution? batch, StepExecution? step)> GetRunningBatchWithStepAsync();
 
     Task<StepExecution?> GetCurrentStepAsync(string batchId);
+
+    Task<List<BatchExecution>> GetTodayAsync();
+    Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId);
+
 }

@@ -156,5 +156,32 @@ public class ExportRepository : IExportRepository
         return report;
     }
 
+    public async Task<List<ExportExecution>> GetByBatchAsync(string batchId)
+    {
+        return await _context.ExportExecutions
+            .Find(x => x.BatchId == ObjectId.Parse(batchId))
+            .ToListAsync();
+    }
 
+    public async Task<int> CountByBatchAsync(string batchId)
+    {
+        return (int)await _context.ExportExecutions
+            .CountDocumentsAsync(x => x.BatchId == ObjectId.Parse(batchId));
+    }
+
+    public async Task<int> CountSuccessAsync(string batchId)
+    {
+        return (int)await _context.ExportExecutions
+            .CountDocumentsAsync(x =>
+                x.BatchId == ObjectId.Parse(batchId) &&
+                x.Status == ExportStatus.Success);
+    }
+
+    public async Task<int> CountErrorsAsync(string batchId)
+    {
+        return (int)await _context.ExportExecutions
+            .CountDocumentsAsync(x =>
+                x.BatchId == ObjectId.Parse(batchId) &&
+                x.Status == ExportStatus.Error);
+    }
 }

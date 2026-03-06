@@ -63,4 +63,10 @@ public class EnrichedProductRepository : IEnrichedProductRepository
         var filter = Builders<EnrichedProduct>.Filter.Eq("BatchId", batchId);
         await _context.EnrichedProducts.DeleteManyAsync(filter);
     }
+
+    public async Task<int> CountByBatchAsync(string batchId)
+    {
+        return (int)await _context.EnrichedProducts
+            .CountDocumentsAsync(x => x.BatchId == ObjectId.Parse(batchId));
+    }
 }

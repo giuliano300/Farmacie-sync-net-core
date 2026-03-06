@@ -38,4 +38,9 @@ public class ResolvedProductRepository : IResolvedProductRepository
         await _context.ResolvedProducts.DeleteManyAsync(filter);
     }
 
+    public async Task<int> CountByBatchAsync(string batchId)
+    {
+        return (int)await _context.ResolvedProducts
+            .CountDocumentsAsync(x => x.BatchId == ObjectId.Parse(batchId));
+    }
 }

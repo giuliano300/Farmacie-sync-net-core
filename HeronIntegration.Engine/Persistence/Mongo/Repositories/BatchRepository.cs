@@ -126,4 +126,30 @@ public class BatchRepository : IBatchRepository
 
         return (batch, step);
     }
+
+
+    public async Task<List<BatchExecution>> GetTodayAsync()
+    {
+        var todayStart = DateTime.UtcNow.Date;
+        var tomorrow = todayStart.AddDays(1);
+
+        return await _context.BatchExecutions
+            .Find(x => x.StartedAt >= todayStart && x.StartedAt < tomorrow)
+            .SortByDescending(x => x.StartedAt)
+            .ToListAsync();
+    }
+
+    public async Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId)
+    {
+        var todayStart = DateTime.UtcNow.Date;
+        var tomorrow = todayStart.AddDays(1);
+
+        return await _context.BatchExecutions
+            .Find(x =>
+                x.CustomerId == customerId &&
+                x.StartedAt >= todayStart &&
+                x.StartedAt < tomorrow)
+            .SortByDescending(x => x.StartedAt)
+            .ToListAsync();
+    }
 }

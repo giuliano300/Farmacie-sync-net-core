@@ -13,4 +13,6 @@ public interface IRawProductRepository
     Task<List<RawProduct>> GetPendingForResolutionAsync(string batchId);
 
     Task DeleteByBatchAsync(string batchId);
+
+    Task<int> CountByBatchAsync(string batchId);
 }

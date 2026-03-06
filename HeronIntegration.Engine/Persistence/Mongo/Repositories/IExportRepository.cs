@@ -27,4 +27,12 @@ public interface IExportRepository
 
     Task SetStatusAsync(string batchId, string aic, ExportStatus status);
 
+    Task<int> CountByBatchAsync(string batchId);
+
+    Task<int> CountSuccessAsync(string batchId);
+
+    Task<int> CountErrorsAsync(string batchId);
+
+    Task<List<ExportExecution>> GetByBatchAsync(string batchId);
+
 }
