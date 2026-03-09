@@ -35,4 +35,30 @@ public class ProducerMappingRepository : IProducerMappingRepository
             .Find(filter)
             .ToListAsync();
     }
+
+    public async Task<ProducerMapping?> GetByIdAsync(string id)
+    {
+        return await _context.ProducerMappings
+            .Find(x => x.Id == id)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task CreateAsync(ProducerMapping producer)
+    {
+        await _context.ProducerMappings.InsertOneAsync(producer);
+    }
+
+    public async Task UpdateAsync(string id, ProducerMapping producer)
+    {
+        await _context.ProducerMappings.ReplaceOneAsync(
+            x => x.Id == id,
+            producer);
+    }
+
+    public async Task DeleteAsync(string id)
+    {
+        await _context.ProducerMappings.DeleteOneAsync(
+            x => x.Id == id);
+    }
+
 }

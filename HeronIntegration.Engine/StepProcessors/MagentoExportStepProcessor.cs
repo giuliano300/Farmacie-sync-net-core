@@ -15,6 +15,7 @@ public class MagentoExportStepProcessor : IStepProcessor
     private readonly ICustomerRepository _customerRepo;
     private readonly IBatchFinalizerService _batchFinalizer;
     private readonly IMagentoExporterFactory _magentoExporterFactory;
+    private readonly IStepRepository _stepRepo;
 
     public MagentoExportStepProcessor(
         IResolvedProductRepository resolvedRepo,
@@ -22,7 +23,8 @@ public class MagentoExportStepProcessor : IStepProcessor
         IBatchFinalizerService batchFinalizer,
         IBatchRepository batchRepo,
         ICustomerRepository customerRepo,
-        IMagentoExporterFactory magentoExporterFactory
+        IMagentoExporterFactory magentoExporterFactory,
+        IStepRepository stepRepo
         )
     {
         _resolvedRepo = resolvedRepo;
@@ -31,6 +33,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         _batchRepo = batchRepo;
         _customerRepo = customerRepo;
         _magentoExporterFactory = magentoExporterFactory;
+        _stepRepo = stepRepo;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -42,6 +45,15 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         try
         {
+            var step = await _stepRepo.GetStepAsync(batchId, "Magento");
+            if (step == null)
+            {
+                result.ErrorMessage = "Nessun step trovato";
+                return result;
+            }
+
+            await _stepRepo.SetRunningAsync(step.Id.ToString());
+
             //CARICAMENTO DATI CUSTOMER
             var batch = await _batchRepo.GetByIdAsync(batchId);
             var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);

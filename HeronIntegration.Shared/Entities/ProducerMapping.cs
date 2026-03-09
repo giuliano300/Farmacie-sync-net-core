@@ -6,7 +6,8 @@ namespace HeronIntegration.Shared.Entities;
 public class ProducerMapping
 {
     [BsonId]
-    public ObjectId Id { get; set; }
+    [BsonRepresentation(BsonType.ObjectId)]
+    public string? Id { get; set; }
 
     public string CustomerId { get; set; } = null!;
 

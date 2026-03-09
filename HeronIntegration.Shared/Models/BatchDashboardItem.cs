@@ -1,4 +1,5 @@
-﻿using HeronIntegration.Shared.Enums;
+﻿using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,7 +12,7 @@ namespace HeronIntegration.Shared.Models
     {
         public string BatchId { get; set; } = default!;
         public int SequenceNumber { get; set; }
-        public string CustomerId { get; set; } = default!;
+        public Customer Customer { get; set; } = default!;
         public DateTime StartedAt { get; set; }
         public BatchStatus Status { get; set; }
 

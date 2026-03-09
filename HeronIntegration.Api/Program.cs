@@ -38,7 +38,8 @@ builder.Services.AddScoped<IExportRepository, ExportRepository>();
 builder.Services.AddScoped<IRawProductRepository, RawProductRepository>();
 builder.Services.AddScoped<IEnrichedProductRepository, EnrichedProductRepository>();
 builder.Services.AddScoped<IResolvedProductRepository, ResolvedProductRepository>();
-
+builder.Services.AddScoped<CategoryMappingRepository>();
+builder.Services.AddScoped<ProducerMappingRepository>();
 
 // HTTP
 builder.Services.AddHttpClient();

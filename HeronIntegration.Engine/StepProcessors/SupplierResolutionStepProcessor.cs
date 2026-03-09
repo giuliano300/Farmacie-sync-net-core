@@ -13,15 +13,19 @@ public class SupplierResolutionStepProcessor : IStepProcessor
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly ISupplierStockRepository _supplierRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
+    private readonly IStepRepository _stepRepo;
+
 
     public SupplierResolutionStepProcessor(
         IEnrichedProductRepository enrichedRepo,
         ISupplierStockRepository supplierRepo,
-        IResolvedProductRepository resolvedRepo)
+        IResolvedProductRepository resolvedRepo,
+        IStepRepository stepRepo)
     {
         _enrichedRepo = enrichedRepo;
         _supplierRepo = supplierRepo;
         _resolvedRepo = resolvedRepo;
+        _stepRepo = stepRepo;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -33,6 +37,16 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 
         try
         {
+
+            var step = await _stepRepo.GetStepAsync(batchId, "Suppliers");
+            if (step == null)
+            {
+                result.ErrorMessage = "Nessun step trovato";
+                return result;
+            }
+
+            await _stepRepo.SetRunningAsync(step.Id.ToString());
+
             var raws = await _enrichedRepo.GetByBatchAsync(batchId);
 
             if (raws == null || raws.Count == 0)

@@ -60,7 +60,7 @@ public class EnrichedProductRepository : IEnrichedProductRepository
 
     public async Task DeleteByBatchAsync(string batchId)
     {
-        var filter = Builders<EnrichedProduct>.Filter.Eq("BatchId", batchId);
+        var filter = Builders<EnrichedProduct>.Filter.Eq("BatchId", ObjectId.Parse(batchId));
         await _context.EnrichedProducts.DeleteManyAsync(filter);
     }
 

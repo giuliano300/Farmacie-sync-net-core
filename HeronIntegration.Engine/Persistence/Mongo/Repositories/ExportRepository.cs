@@ -174,7 +174,7 @@ public class ExportRepository : IExportRepository
         return (int)await _context.ExportExecutions
             .CountDocumentsAsync(x =>
                 x.BatchId == ObjectId.Parse(batchId) &&
-                x.Status == ExportStatus.Success);
+                x.Status == ExportStatus.UpdatePrice);
     }
 
     public async Task<int> CountErrorsAsync(string batchId)

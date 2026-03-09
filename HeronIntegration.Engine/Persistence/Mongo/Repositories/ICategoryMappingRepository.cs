@@ -11,4 +11,12 @@ public interface ICategoryMappingRepository
         string sourceSubCategory);
     Task<List<CategoryMapping>?> GetByCustomerAsync(
         string customerId);
+
+    Task<CategoryMapping?> GetByIdAsync(string id);
+
+    Task CreateAsync(CategoryMapping category);
+
+    Task UpdateAsync(string id, CategoryMapping category);
+
+    Task DeleteAsync(string id);
 }

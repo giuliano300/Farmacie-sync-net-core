@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using MongoDB.Bson;
 using MongoDB.Driver;
 
 public class CategoryMappingRepository : ICategoryMappingRepository
@@ -35,5 +36,30 @@ public class CategoryMappingRepository : ICategoryMappingRepository
         return await _context.CategoryMappings
             .Find(filter)
             .ToListAsync();
+    }
+
+    public async Task<CategoryMapping?> GetByIdAsync(string id)
+    {
+        return await _context.CategoryMappings
+            .Find(x => x.Id == id)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task CreateAsync(CategoryMapping category)
+    {
+        await _context.CategoryMappings.InsertOneAsync(category);
+    }
+
+    public async Task UpdateAsync(string id, CategoryMapping category)
+    {
+        await _context.CategoryMappings.ReplaceOneAsync(
+            x => x.Id ==id,
+            category);
+    }
+
+    public async Task DeleteAsync(string id)
+    {
+        await _context.CategoryMappings.DeleteOneAsync(
+            x => x.Id == id);
     }
 }

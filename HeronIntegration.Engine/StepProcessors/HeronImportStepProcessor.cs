@@ -17,6 +17,7 @@ public class HeronImportStepProcessor : IStepProcessor
     private readonly IHeronXmlParser _parser;
     private readonly ICategoryResolver _categoryResolver;
     private readonly IProducerResolver _producerResolver;
+    private readonly IStepRepository _stepRepo;
 
     public HeronImportStepProcessor(
         IBatchRepository batchRepo,
@@ -24,7 +25,8 @@ public class HeronImportStepProcessor : IStepProcessor
         IExportRepository exportRepo,
         IHeronXmlParser parser,
         ICategoryResolver categoryResolver,
-        IProducerResolver producerResolver)
+        IProducerResolver producerResolver,
+        IStepRepository stepRepo)
     {
         _batchRepo = batchRepo;
         _rawRepo = rawRepo;
@@ -32,6 +34,7 @@ public class HeronImportStepProcessor : IStepProcessor
         _parser = parser;
         _categoryResolver = categoryResolver;
         _producerResolver = producerResolver;
+        _stepRepo = stepRepo;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -43,6 +46,16 @@ public class HeronImportStepProcessor : IStepProcessor
 
         try
         {
+            var step = await _stepRepo.GetStepAsync(batchId, "HeronImport");
+            if (step == null)
+            {
+                result.ErrorMessage = "Nessun step trovato";
+                return result;
+            }
+
+            await _stepRepo.SetRunningAsync(step.Id.ToString());
+
+
             var batch = await _batchRepo.GetByIdAsync(batchId);
             if (batch == null)
                 throw new Exception($"Batch {batchId} non trovato");

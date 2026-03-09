@@ -9,5 +9,6 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
     public interface ICleanupService
     {
         Task CleanupBatchAsync(string batchId);
+        Task CleanupPipeLineAsync(string step, string batchId);
     }
 }

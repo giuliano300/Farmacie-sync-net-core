@@ -1,7 +1,8 @@
-﻿using MongoDB.Bson;
-using MongoDB.Driver;
-using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Shared.Enums;
+using HeronIntegration.Shared.Models;
+using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -52,11 +53,10 @@ public class StepRepository : IStepRepository
             update);
     }
 
-    public async Task SetSuccessAsync(string id, DateTime? StartedAt, DateTime? EndedAt)
+    public async Task SetSuccessAsync(string id, DateTime? EndedAt)
     {
         var update = Builders<StepExecution>.Update
             .Set(x => x.Status, StepStatus.Success)
-            .Set(a => a.StartedAt, StartedAt)
             .Set(x => x.EndedAt, EndedAt);
 
         await _context.StepExecutions.UpdateOneAsync(
@@ -118,5 +118,24 @@ public class StepRepository : IStepRepository
             .Find(x => x.BatchId == ObjectId.Parse(batchId))
             .SortBy(x => x.Step)
             .ToListAsync();
+    }
+
+
+    public async Task ResetNextStepsAsync(string batchId, List<string> steps)
+    {
+        var filter = Builders<StepExecution>.Filter.And(
+        Builders<StepExecution>.Filter.Eq(x => x.BatchId, ObjectId.Parse(batchId)),
+        Builders<StepExecution>.Filter.In(x => x.Step, steps)
+    );
+
+        var update = Builders<StepExecution>.Update
+            .Set(x => x.Status, StepStatus.Pending)
+            .Set(x => x.StartedAt, null)
+            .Set(x => x.EndedAt, null)
+            .Set(x => x.ErrorMessage, null)
+            .Set(x => x.AttemptCount, 0)
+            .Set(x => x.ManualTrigger, false);
+
+        await _context.StepExecutions.UpdateManyAsync(filter, update);
     }
 }

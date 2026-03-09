@@ -17,19 +17,22 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
     private readonly IProductEnrichmentService _enrichmentService;
     private readonly IFarmadatiCacheRepository _farmadatiCacheRepo;
     private readonly IManagementCacheRepository _managementCacheRepo;
+    private readonly IStepRepository _stepRepo;
 
     public FarmadatiEnrichmentStepProcessor(
         IRawProductRepository rawRepo,
         IEnrichedProductRepository enrichedRepo,
         IProductEnrichmentService enrichmentService,
         IFarmadatiCacheRepository farmadatiCacheRepo,
-        IManagementCacheRepository managementCacheRepo)
+        IManagementCacheRepository managementCacheRepo,
+        IStepRepository stepRepo)
     {
         _rawRepo = rawRepo;
         _enrichedRepo = enrichedRepo;
         _enrichmentService = enrichmentService;
         _farmadatiCacheRepo = farmadatiCacheRepo;
         _managementCacheRepo = managementCacheRepo;
+        _stepRepo = stepRepo;
     }
 
     public async Task<StepExecutionResult?> ExecuteAsync(string batchId)
@@ -38,6 +41,15 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         result.StartedAt = DateTime.Now;
         try
         {
+            var step = await _stepRepo.GetStepAsync(batchId, "Farmadati");
+            if (step == null)
+            {
+                result.ErrorMessage = "Nessun step trovato";
+                return result;
+            }
+
+            await _stepRepo.SetRunningAsync(step.Id.ToString());
+
             var raws = await _rawRepo.GetByBatchAsync(batchId);
 
             var existing = await _enrichedRepo.GetAicsByBatchAsync(batchId);

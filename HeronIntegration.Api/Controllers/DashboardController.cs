@@ -80,11 +80,13 @@ public class DashboardController : ControllerBase
         var exportSuccess = await _exportRepo.CountSuccessAsync(batchId);
         var exportErrors = await _exportRepo.CountErrorsAsync(batchId);
 
+        var customer = await _customerRepo.GetByIdAsync(batch.CustomerId);
+
         return new BatchDashboardItem
         {
             BatchId = batchId,
             SequenceNumber = batch.SequenceNumber,
-            CustomerId = batch.CustomerId,
+            Customer = customer!,
             StartedAt = batch.StartedAt,
             Status = batch.Status,
 

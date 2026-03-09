@@ -1,4 +1,5 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+using MongoDB.Bson;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -13,7 +14,7 @@ public interface IStepRepository
 
     Task SetRunningAsync(string id);
 
-    Task SetSuccessAsync(string id, DateTime? StartedAt, DateTime? EndedAt);
+    Task SetSuccessAsync(string id, DateTime? EndedAt);
 
     Task SetErrorAsync(string id, string error);
 
@@ -22,4 +23,6 @@ public interface IStepRepository
     Task<List<StepExecution>> GetByBatchAsync(string batchId);
     Task CreateDefaultStepsAsync(string batchId, string customerId);
     Task ResetStepsAsync(string batchId);
+    Task ResetNextStepsAsync(string batchId, List<string> steps);
+
 }

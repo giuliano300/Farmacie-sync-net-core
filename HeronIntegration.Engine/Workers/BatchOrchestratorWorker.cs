@@ -66,7 +66,7 @@ public class BatchOrchestratorWorker : BackgroundService
 
             await processor.ExecuteAsync(step.BatchId.ToString());
 
-            await _stepRepo.SetSuccessAsync(step.Id.ToString(), StartedAt, DateTime.UtcNow);
+            await _stepRepo.SetSuccessAsync(step.Id.ToString(), DateTime.UtcNow);
         }
         catch (Exception ex)
         {

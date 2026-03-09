@@ -124,6 +124,10 @@ builder.Services.AddScoped<IBatchFinalizerService, BatchFinalizerService>();
 builder.Services.AddScoped<IBatchReportService, BatchReportService>();
 builder.Services.AddScoped<ICleanupService, CleanupService>();
 
+builder.Services.AddScoped<CategoryMappingRepository>();
+builder.Services.AddScoped<ProducerMappingRepository>();
+
+
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IMagentoExporterFactory, MagentoExporterFactory>();
 
