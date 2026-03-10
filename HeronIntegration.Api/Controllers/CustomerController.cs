@@ -56,21 +56,30 @@ public class CustomersController : ControllerBase
                     .FirstOrDefault(x => x.Status != StepStatus.Success);
 
                 canStartNewBatch = step == null;
-            }
 
-            result.Add(new CustomerWithBatchStatus
-            {
-                Customer = customer,
-                CanStartNewBatch = canStartNewBatch,
-                RunningBatchId = runningBatch?.Id.ToString(),
-                RunningStepId = step?.Id.ToString(),
-                CurrentStep = step?.Step,
-                StepStatus = step?.Status
-            });
+                result.Add(new CustomerWithBatchStatus
+                {
+                    Customer = customer,
+                    CanStartNewBatch = canStartNewBatch,
+                    RunningBatchId = runningBatch?.Id.ToString(),
+                    CreatedAt = runningBatch!.StartedAt!,
+                    RunningStepId = step?.Id.ToString(),
+                    CurrentStep = step?.Step,
+                    StepStatus = step?.Status
+                });
+            }
+            else
+                result.Add(new CustomerWithBatchStatus
+                {
+                    Customer = customer,
+                    CanStartNewBatch = canStartNewBatch
+                });
+
         }
 
         return Ok(result);
     }
+
     [HttpGet("{id}")]
     public async Task<IActionResult> Get(string id)
     {
@@ -98,20 +107,25 @@ public class CustomersController : ControllerBase
 
             canStartNewBatch = step == null;
 
+
+            var result = new CustomerWithBatchStatus
+            {
+                Customer = customer,
+                CanStartNewBatch = canStartNewBatch,
+                RunningBatchId = runningBatch?.Id.ToString(),
+                RunningStepId = step?.Id.ToString(),
+                CurrentStep = step?.Step,
+                StepStatus = step?.Status
+            };
+
+            return Ok(result);
         }
 
-        var result = new CustomerWithBatchStatus
+        return Ok(new CustomerWithBatchStatus
         {
             Customer = customer,
-            CanStartNewBatch = canStartNewBatch,
-            RunningBatchId = runningBatch?.Id.ToString(),
-            RunningStepId = step?.Id.ToString(),
-            CurrentStep = step?.Step,
-            StepStatus = step?.Status
-        };
-
-
-        return Ok(result);
+            CanStartNewBatch = canStartNewBatch
+        });
     }
 
     [HttpPost]

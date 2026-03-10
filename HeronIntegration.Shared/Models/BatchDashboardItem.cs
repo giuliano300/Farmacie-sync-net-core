@@ -22,7 +22,7 @@ namespace HeronIntegration.Shared.Models
         public StepMetrics HeronImport { get; set; } = new();
         public StepMetrics Farmadati { get; set; } = new();
         public StepMetrics Suppliers { get; set; } = new();
-        public StepMetrics Magento { get; set; } = new();
+        public StepMetricsMagento Magento { get; set; } = new();
     }
 
     public class StepMetrics
@@ -30,6 +30,25 @@ namespace HeronIntegration.Shared.Models
         public int Total { get; set; }
         public int Success { get; set; }
         public int Errors { get; set; }
+        public double Progress =>
+        Total == 0 ? 0 : Math.Round((double)Success / Total * 100, 2);
+    }
+
+    public class StepMetricsMagento
+    {
+        public int Total { get; set; }
+        public int Pending { get; set; }
+        public int Insert { get; set; }
+        public int UpdatePrice { get; set; }
+        public int InsertImages { get; set; }
+        public int Success { get; set; }
+        public int Errors { get; set; }
+        public double ProgressInsert =>
+        Total == 0 ? 0 : Math.Round((double) (Insert + UpdatePrice + InsertImages + Success) / Total * 100, 2);
+        public double ProgressUpdatePrice =>
+        Total == 0 ? 0 : Math.Round((double) (UpdatePrice + InsertImages + Success) / Total * 100, 2);
+        public double ProgressInsertImages =>
+        Total == 0 ? 0 : Math.Round((double)(InsertImages + Success) / Total * 100, 2);
         public double Progress =>
         Total == 0 ? 0 : Math.Round((double)Success / Total * 100, 2);
     }

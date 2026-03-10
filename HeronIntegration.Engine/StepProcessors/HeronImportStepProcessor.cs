@@ -18,6 +18,7 @@ public class HeronImportStepProcessor : IStepProcessor
     private readonly ICategoryResolver _categoryResolver;
     private readonly IProducerResolver _producerResolver;
     private readonly IStepRepository _stepRepo;
+    private readonly ICleanupService _cleanupService;
 
     public HeronImportStepProcessor(
         IBatchRepository batchRepo,
@@ -26,7 +27,8 @@ public class HeronImportStepProcessor : IStepProcessor
         IHeronXmlParser parser,
         ICategoryResolver categoryResolver,
         IProducerResolver producerResolver,
-        IStepRepository stepRepo)
+        IStepRepository stepRepo,
+        ICleanupService cleanupService)
     {
         _batchRepo = batchRepo;
         _rawRepo = rawRepo;
@@ -35,6 +37,7 @@ public class HeronImportStepProcessor : IStepProcessor
         _categoryResolver = categoryResolver;
         _producerResolver = producerResolver;
         _stepRepo = stepRepo;
+        _cleanupService = cleanupService;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -46,6 +49,8 @@ public class HeronImportStepProcessor : IStepProcessor
 
         try
         {
+            await _cleanupService.updateExportExecution(batchId);
+
             var step = await _stepRepo.GetStepAsync(batchId, "HeronImport");
             if (step == null)
             {

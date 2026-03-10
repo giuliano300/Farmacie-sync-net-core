@@ -1,4 +1,5 @@
-﻿using System;
+﻿using HeronIntegration.Shared.Enums;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -10,5 +11,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
     {
         Task CleanupBatchAsync(string batchId);
         Task CleanupPipeLineAsync(string step, string batchId);
+
+        Task updateExportExecution(string batchId, ExportStatus status = ExportStatus.Pending);
     }
 }

@@ -20,5 +20,7 @@ namespace HeronIntegration.Shared.Models
         public string? CurrentStep { get; set; }
 
         public StepStatus? StepStatus { get; set; }
+
+        public DateTime? CreatedAt { get; set; }
     }
 }

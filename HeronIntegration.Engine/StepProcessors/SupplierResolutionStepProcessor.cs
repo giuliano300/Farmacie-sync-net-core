@@ -14,18 +14,21 @@ public class SupplierResolutionStepProcessor : IStepProcessor
     private readonly ISupplierStockRepository _supplierRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
     private readonly IStepRepository _stepRepo;
+    private readonly ICleanupService _cleanupService;
 
 
     public SupplierResolutionStepProcessor(
         IEnrichedProductRepository enrichedRepo,
         ISupplierStockRepository supplierRepo,
         IResolvedProductRepository resolvedRepo,
-        IStepRepository stepRepo)
+        IStepRepository stepRepo,
+        ICleanupService cleanupService)
     {
         _enrichedRepo = enrichedRepo;
         _supplierRepo = supplierRepo;
         _resolvedRepo = resolvedRepo;
         _stepRepo = stepRepo;
+        _cleanupService = cleanupService;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -37,6 +40,8 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 
         try
         {
+
+            await _cleanupService.updateExportExecution(batchId);
 
             var step = await _stepRepo.GetStepAsync(batchId, "Suppliers");
             if (step == null)

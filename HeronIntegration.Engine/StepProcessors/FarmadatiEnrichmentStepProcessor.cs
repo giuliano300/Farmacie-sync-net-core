@@ -18,6 +18,7 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
     private readonly IFarmadatiCacheRepository _farmadatiCacheRepo;
     private readonly IManagementCacheRepository _managementCacheRepo;
     private readonly IStepRepository _stepRepo;
+    private readonly ICleanupService _cleanupService;
 
     public FarmadatiEnrichmentStepProcessor(
         IRawProductRepository rawRepo,
@@ -25,7 +26,8 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         IProductEnrichmentService enrichmentService,
         IFarmadatiCacheRepository farmadatiCacheRepo,
         IManagementCacheRepository managementCacheRepo,
-        IStepRepository stepRepo)
+        IStepRepository stepRepo,
+        ICleanupService cleanupService)
     {
         _rawRepo = rawRepo;
         _enrichedRepo = enrichedRepo;
@@ -33,6 +35,7 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         _farmadatiCacheRepo = farmadatiCacheRepo;
         _managementCacheRepo = managementCacheRepo;
         _stepRepo = stepRepo;
+        _cleanupService = cleanupService;
     }
 
     public async Task<StepExecutionResult?> ExecuteAsync(string batchId)
@@ -41,6 +44,8 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         result.StartedAt = DateTime.Now;
         try
         {
+            await _cleanupService.updateExportExecution(batchId);
+
             var step = await _stepRepo.GetStepAsync(batchId, "Farmadati");
             if (step == null)
             {

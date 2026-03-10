@@ -60,12 +60,12 @@ public class CleanupService : ICleanupService
             await updateExportExecution(batchId);
     }
 
-    private async Task updateExportExecution(string batchId)
+    public async Task updateExportExecution(string batchId, ExportStatus status = ExportStatus.Pending)
     {
         await _context.ExportExecutions.UpdateManyAsync(
             x => x.BatchId == ObjectId.Parse(batchId),
             Builders<ExportExecution>.Update
-                .Set(x => x.Status, ExportStatus.Pending)
+                .Set(x => x.Status, status)
                 .Set(x => x.LastAttemptAt, null)
         );
     }

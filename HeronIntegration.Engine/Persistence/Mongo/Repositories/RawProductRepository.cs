@@ -39,7 +39,7 @@ public class RawProductRepository : IRawProductRepository
 
     public async Task DeleteByBatchAsync(string batchId)
     {
-        var filter = Builders<RawProduct>.Filter.Eq("BatchId", batchId);
+        var filter = Builders<RawProduct>.Filter.Eq("BatchId", ObjectId.Parse(batchId));
         await _context.RawProducts.DeleteManyAsync(filter);
     }
 

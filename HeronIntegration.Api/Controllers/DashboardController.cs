@@ -76,8 +76,16 @@ public class DashboardController : ControllerBase
         var enrichedTotal = await _enrichedRepo.CountByBatchAsync(batchId);
         var resolvedTotal = await _resolvedRepo.CountByBatchAsync(batchId);
 
-        var exportTotal = await _exportRepo.CountByBatchAsync(batchId);
-        var exportSuccess = await _exportRepo.CountSuccessAsync(batchId);
+        var export = await _exportRepo.GetByBatchAsync(batchId);
+        var exportTotal = export.Count();
+
+        var exportPending = export.Where(a => a.Status == ExportStatus.Pending).Count();
+        var exportSuccess = export.Where(a => a.Status == ExportStatus.Success).Count();
+        var exportInsert = export.Where(a => a.Status == ExportStatus.Insert).Count();
+        var exportUpdatePrice = export.Where(a => a.Status == ExportStatus.UpdatePrice).Count();
+        var exportInsertImage = export.Where(a => a.Status == ExportStatus.InsertImages).Count();
+        var exportError = export.Where(a => a.Status == ExportStatus.Error).Count();
+
         var exportErrors = await _exportRepo.CountErrorsAsync(batchId);
 
         var customer = await _customerRepo.GetByIdAsync(batch.CustomerId);
@@ -111,11 +119,15 @@ public class DashboardController : ControllerBase
                 Success = resolvedTotal
             },
 
-            Magento = new StepMetrics
+            Magento = new StepMetricsMagento
             {
                 Total = exportTotal,
                 Success = exportSuccess,
-                Errors = exportErrors
+                Errors = exportErrors,
+                InsertImages = exportInsertImage,
+                Insert = exportInsert,
+                UpdatePrice = exportUpdatePrice,
+                Pending = exportPending
             }
         };
     }

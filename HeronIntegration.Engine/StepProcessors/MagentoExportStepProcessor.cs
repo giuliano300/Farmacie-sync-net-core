@@ -16,6 +16,7 @@ public class MagentoExportStepProcessor : IStepProcessor
     private readonly IBatchFinalizerService _batchFinalizer;
     private readonly IMagentoExporterFactory _magentoExporterFactory;
     private readonly IStepRepository _stepRepo;
+    private readonly ICleanupService _cleanupService;
 
     public MagentoExportStepProcessor(
         IResolvedProductRepository resolvedRepo,
@@ -24,7 +25,8 @@ public class MagentoExportStepProcessor : IStepProcessor
         IBatchRepository batchRepo,
         ICustomerRepository customerRepo,
         IMagentoExporterFactory magentoExporterFactory,
-        IStepRepository stepRepo
+        IStepRepository stepRepo,
+        ICleanupService cleanupService
         )
     {
         _resolvedRepo = resolvedRepo;
@@ -34,6 +36,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         _customerRepo = customerRepo;
         _magentoExporterFactory = magentoExporterFactory;
         _stepRepo = stepRepo;
+        _cleanupService = cleanupService;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId)
@@ -45,6 +48,8 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         try
         {
+            await _cleanupService.updateExportExecution(batchId);
+
             var step = await _stepRepo.GetStepAsync(batchId, "Magento");
             if (step == null)
             {

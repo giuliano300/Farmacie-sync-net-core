@@ -123,10 +123,12 @@ public class StepRepository : IStepRepository
 
     public async Task ResetNextStepsAsync(string batchId, List<string> steps)
     {
+        var stepNames = steps.Select(x => x.ToString()).ToList();
+
         var filter = Builders<StepExecution>.Filter.And(
-        Builders<StepExecution>.Filter.Eq(x => x.BatchId, ObjectId.Parse(batchId)),
-        Builders<StepExecution>.Filter.In(x => x.Step, steps)
-    );
+            Builders<StepExecution>.Filter.Eq("BatchId", ObjectId.Parse(batchId)),
+            Builders<StepExecution>.Filter.In("Step", stepNames)
+        );
 
         var update = Builders<StepExecution>.Update
             .Set(x => x.Status, StepStatus.Pending)

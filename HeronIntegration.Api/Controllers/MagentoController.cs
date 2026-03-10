@@ -1,11 +1,10 @@
-﻿using HeronIntegration.Engine.External.Farmadati.Enrichment;
-using HeronIntegration.Engine.Persistence.Mongo;
+﻿using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Bson;
+using System.Collections.Concurrent;
 
 [ApiController]
 [Route("api/Magento")]
@@ -17,6 +16,10 @@ public class MagentoController : ControllerBase
     private readonly IBatchFinalizerService _batchFinalizer;
     private readonly ICustomerRepository _customerRepo;
     private readonly IBatchRepository _batchRepo;
+    private readonly ICleanupService _cleanupService;
+    private readonly IStepRepository _stepRepo;
+
+    private static readonly ConcurrentDictionary<string, CancellationTokenSource> _runningApiProcesses = new();
 
     public MagentoController(
         IResolvedProductRepository resolvedRepo,
@@ -24,7 +27,9 @@ public class MagentoController : ControllerBase
         IMagentoExporterFactory magentoExporterFactory,
         IBatchRepository batchRepo,
         ICustomerRepository customerRepo,
-        IBatchFinalizerService batchFinalizer)
+        IBatchFinalizerService batchFinalizer,
+        ICleanupService cleanupService,
+        IStepRepository stepRepo)
     {
         _resolvedRepo = resolvedRepo;
         _exportRepo = exportRepo;
@@ -32,43 +37,72 @@ public class MagentoController : ControllerBase
         _magentoExporterFactory = magentoExporterFactory;
         _batchFinalizer = batchFinalizer;
         _batchRepo = batchRepo;
+        _cleanupService = cleanupService;
+        _stepRepo = stepRepo;
     }
 
-    [HttpGet("")]
-    public async Task<StepExecutionResult> MassiveImport(string batchId)
+    //--------------------------------------------------
+    // STOP PROCESSI PRECEDENTI
+    //--------------------------------------------------
+
+    private void CancelRunningProcess(string batchId)
     {
-        var result = new StepExecutionResult
+        if (_runningApiProcesses.TryRemove(batchId, out var existing))
+            existing.Cancel();
+    }
+
+    private CancellationToken StartProcess(string batchId)
+    {
+        CancelRunningProcess(batchId);
+
+        var cts = new CancellationTokenSource();
+        _runningApiProcesses[batchId] = cts;
+
+        return cts.Token;
+    }
+
+    //--------------------------------------------------
+    // MASSIVE IMPORT
+    //--------------------------------------------------
+
+    [HttpGet("")]
+    public async Task<IActionResult> MassiveImport(string batchId)
+    {
+        await _cleanupService.updateExportExecution(batchId);
+
+        var step = await _stepRepo.GetStepAsync(batchId, "Magento");
+
+        if (step == null)
+            throw new Exception("Step Magento non trovato");
+
+        await _stepRepo.SetRunningAsync(step.Id.ToString());
+
+        var token = StartProcess(batchId);
+
+        _ = Task.Run(async () =>
         {
-            StartedAt = DateTime.UtcNow
-        };
-
-        try
-        {
-            //CARICAMENTO DATI CUSTOMER
-            var batch = await _batchRepo.GetByIdAsync(batchId);
-            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
-
-            if (customer?.Magento == null)
-                throw new Exception("Magento config mancante");
-
-            var _exporter = _magentoExporterFactory.Create(customer.Magento);
-
-            // =====================================================
-            // CARICAMENTO METADATI MAGENTO
-            // =====================================================
-            var magentoMetatada = await _exporter.GetMagentoMetadataAsync();
-
-            var magentoDict = magentoMetatada.magentoProducts!
-                .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
-
-            // =====================================================
-            //  CARICAMENTO PRODOTTI MONGO
-            // =====================================================
-            var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
-
-            var mappedList = resolvedList.Select(p =>
+            try
             {
-                return new ResolvedProduct
+                var batch = await _batchRepo.GetByIdAsync(batchId);
+                var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+                if (customer?.Magento == null)
+                    throw new Exception("Magento config mancante");
+
+                var exporter = _magentoExporterFactory.Create(customer.Magento);
+
+                token.ThrowIfCancellationRequested();
+
+                var magentoMetadata = await exporter.GetMagentoMetadataAsync();
+
+                var magentoDict = magentoMetadata.magentoProducts!
+                    .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
+
+                var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
+
+                token.ThrowIfCancellationRequested();
+
+                var mappedList = resolvedList.Select(p => new ResolvedProduct
                 {
                     Aic = p.Aic,
                     Name = p.Name,
@@ -76,269 +110,200 @@ public class MagentoController : ControllerBase
                     Availability = p.Availability,
                     LongDescription = p.LongDescription,
                     ShortDescription = p.ShortDescription,
-                    SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
-                                    magentoMetatada.suppliers!.TryGetValue(p.SupplierCode, out var supplierId))
-                                        ? supplierId.ToString()
-                                        : "0",
-                    Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
-                                magentoMetatada.manufacturers!.TryGetValue(p.Producer, out var manufacturerId))
-                                        ? manufacturerId.ToString()
-                                        : "0",
-                    SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
-                                   _exporter.ResolveCategoryId(magentoMetatada.categories!, p.SubCategory) is int categoryId)
-                                        ? categoryId.ToString()
-                                        : null,
+                    SupplierCode = p.SupplierCode,
+                    Producer = p.Producer,
+                    SubCategory = p.SubCategory,
                     Images = p.Images
-                };
-            }).ToList();
+                }).ToList();
 
-            var mongoDict = mappedList
-                .ToDictionary(x => x.Aic, StringComparer.OrdinalIgnoreCase);
+                var mongoDict = mappedList.ToDictionary(x => x.Aic);
 
-            // =====================================================
-            // CALCOLO UPSERT (insert + update)
-            // =====================================================
-            var toUpsert = new List<ResolvedProduct>();
-            var toSkipUpsert = new List<ResolvedProduct>();
+                var toUpsert = new List<ResolvedProduct>();
 
-            foreach (var mongoProduct in mappedList)
-            {
-                if (!magentoDict.TryGetValue(mongoProduct.Aic, out var magentoProduct))
+                foreach (var product in mappedList)
                 {
-                    toUpsert.Add(mongoProduct);
-                    continue;
+                    token.ThrowIfCancellationRequested();
+
+                    if (!magentoDict.TryGetValue(product.Aic, out var magentoProduct))
+                    {
+                        toUpsert.Add(product);
+                        continue;
+                    }
+
+                    if (magentoProduct.Price != product.Price)
+                        toUpsert.Add(product);
                 }
 
-                bool needsUpdate = false;
+                token.ThrowIfCancellationRequested();
 
-                if (magentoProduct.Price != mongoProduct.Price)
-                    needsUpdate = true;
+                if (toUpsert.Any())
+                    await exporter.ImportProductsAsync(toUpsert);
 
-                if ((magentoProduct.Manufacturer ?? "") != (mongoProduct.Producer ?? ""))
-                    needsUpdate = true;
+                token.ThrowIfCancellationRequested();
 
-                if ((magentoProduct.Supplier ?? "") != (mongoProduct.SupplierCode ?? ""))
-                    needsUpdate = true;
+                await UpdateStockBulkInternal(batchId, exporter, token);
 
-                if ((magentoProduct.Description ?? "").Trim() !=
-                    (mongoProduct.ShortDescription ?? "").Trim() && ((magentoProduct.Description ?? "").Trim() !=
-                    (mongoProduct.LongDescription ?? "").Trim()))
-                    needsUpdate = true;
+                token.ThrowIfCancellationRequested();
 
-                var mongoCats = new HashSet<string>(
-                    new[] { mongoProduct.SubCategory! }
-                        .Where(x => !string.IsNullOrWhiteSpace(x)));
+                await exporter.UpdateImageBulkAsync(mappedList);
 
-                var magentoCats = new HashSet<string>(
-                    magentoProduct.Categories ?? new List<string>());
+                token.ThrowIfCancellationRequested();
 
-                if (!mongoCats.IsSubsetOf(magentoCats))
-                    needsUpdate = true;
+                await exporter.RunMagentoCronAsync();
 
-                if (needsUpdate)
-                    toUpsert.Add(mongoProduct);
-                else
-                    toSkipUpsert.Add(mongoProduct);
+                await _batchFinalizer.FinalizeBatchAsync(batchId);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"Batch {batchId} cancellato");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
             }
 
-            // =====================================================
-            // SKU DA DISABILITARE
-            // =====================================================
-            var toDisable = magentoMetatada.magentoProducts!
-                .Where(m => !mongoDict.ContainsKey(m.Sku))
-                .Select(m => m.Sku)
-                .ToList();
+        }, token);
 
-
-            // =====================================================
-            //  UPSERT
-            // =====================================================
-            if (toSkipUpsert.Any())
-                await _exportRepo.ChangeStatusAsync(batchId, toSkipUpsert, ExportStatus.Insert);
-
-            if (toUpsert.Any())
-                await _exporter.ImportProductsAsync(toUpsert);
-
-
-            // =====================================================
-            //  UPDATE STOCK
-            // =====================================================
-            await UpdateStockBulkAsync(batchId);
-
-            // =====================================================
-            // DISABILITAZIONE PRODOTTI MANCANTI
-            // =====================================================
-            if (toDisable.Any())
-                await _exporter.DisableProductsAsync(toDisable);
-
-            // =====================================================
-            //  UPLOAD IMMAGINI SOLO PER UPSERT
-            // =====================================================
-            var all = mappedList;
-            await _exporter.UpdateImageBulkAsync(all);
-
-            // =====================================================
-            // CRON MAGENTO
-            // =====================================================
-            await _exporter.RunMagentoCronAsync();
-
-            // =====================================================
-            // FINALIZZAZIONE
-            // =====================================================
-            await _batchFinalizer.FinalizeBatchAsync(batchId);
-
-            //await _exportRepo.ChangeStatusAsync(batchId, resolvedList, ExportStatus.Success);
-
-            result.Success = true;
-        }
-        catch (Exception ex)
-        {
-            result.Success = false;
-            result.ErrorMessage = ex.Message;
-        }
-
-        result.FinishedAt = DateTime.UtcNow;
-        return result;
+        return Ok("Massive import avviato");
     }
 
+    //--------------------------------------------------
+    // UPDATE STOCK
+    //--------------------------------------------------
 
     [HttpGet("updateStockBulk")]
-    public async Task<StepExecutionResult> UpdateStockBulkAsync(string batchId)
+    public async Task<IActionResult> UpdateStockBulkAsync(string batchId)
     {
+        await _cleanupService.updateExportExecution(batchId, ExportStatus.Insert);
 
-        var result = new StepExecutionResult
+        var token = StartProcess(batchId);
+
+        _ = Task.Run(async () =>
         {
-            StartedAt = DateTime.UtcNow
-        };
-
-        try
-        {
-            var batch = await _batchRepo.GetByIdAsync(batchId);
-            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
-
-            if (customer?.Magento == null)
-                throw new Exception("Magento config mancante");
-
-            var _exporter = _magentoExporterFactory.Create(customer.Magento);
-
-            var inventory = await _resolvedRepo.GetByBatchAsync(batchId);
-            var list = inventory.Select(p => new InventoryItem
+            try
             {
-                Id = batchId,
-                Sku = p.Aic,
-                Qty = p.Availability
-            }).ToList();
+                var batch = await _batchRepo.GetByIdAsync(batchId);
+                var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
 
-            await _exporter.UpdateStockBulkAsync(list);
-            await _exporter.RunMagentoCronAsync();
+                if (customer?.Magento == null)
+                    throw new Exception("Magento config mancante");
 
-        }
-        catch (Exception e)
-        {
-            result.Success = false;
-            result.ErrorMessage = e.Message;
-        }
+                var exporter = _magentoExporterFactory.Create(customer.Magento);
 
-        result.FinishedAt = DateTime.UtcNow;
+                await UpdateStockBulkInternal(batchId, exporter, token);
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"Stock update cancellato {batchId}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+            }
 
-        return result;
+        }, token);
+
+        return Ok("Update stock avviato");
     }
+
+    private async Task UpdateStockBulkInternal(string batchId, IMagentoExporter exporter, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        var inventory = await _resolvedRepo.GetByBatchAsync(batchId);
+
+        token.ThrowIfCancellationRequested();
+
+        var list = inventory.Select(p => new InventoryItem
+        {
+            Id = batchId,
+            Sku = p.Aic,
+            Qty = p.Availability
+        }).ToList();
+
+        await exporter.UpdateStockBulkAsync(list);
+
+        token.ThrowIfCancellationRequested();
+
+        await exporter.RunMagentoCronAsync();
+    }
+
+    //--------------------------------------------------
+    // UPDATE IMAGES
+    //--------------------------------------------------
 
     [HttpGet("updateImageBulk")]
-    public async Task<StepExecutionResult> UpdateImageBulkAsync(string batchId)
+    public async Task<IActionResult> UpdateImageBulkAsync(string batchId)
     {
-        var result = new StepExecutionResult
+        await _cleanupService.updateExportExecution(batchId, ExportStatus.UpdatePrice);
+
+        var token = StartProcess(batchId);
+
+        _ = Task.Run(async () =>
         {
-            StartedAt = DateTime.UtcNow
-        };
+            try
+            {
+                var batch = await _batchRepo.GetByIdAsync(batchId);
+                var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
 
-        try
-        {
-            var batch = await _batchRepo.GetByIdAsync(batchId);
-            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+                if (customer?.Magento == null)
+                    throw new Exception("Magento config mancante");
 
-            if (customer?.Magento == null)
-                throw new Exception("Magento config mancante");
+                var exporter = _magentoExporterFactory.Create(customer.Magento);
 
-            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+                token.ThrowIfCancellationRequested();
 
-            var list = await _resolvedRepo.GetByBatchAsync(batchId);
-            await _exporter.UpdateImageBulkAsync(list);
-            await _exporter.RunMagentoCronAsync();
+                var list = await _resolvedRepo.GetByBatchAsync(batchId);
 
-        }
-        catch (Exception e)
-        {
-            result.Success = false;
-            result.ErrorMessage = e.Message;
-        }
+                await exporter.UpdateImageBulkAsync(list);
 
-        result.FinishedAt = DateTime.UtcNow;
+                token.ThrowIfCancellationRequested();
 
-        return result;
+                await exporter.RunMagentoCronAsync();
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"Upload immagini cancellato {batchId}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex);
+            }
+
+        }, token);
+
+        return Ok("Upload immagini avviato");
     }
+
+    //--------------------------------------------------
+    // CRON
+    //--------------------------------------------------
 
     [HttpGet("runMagentoCronAsync")]
-    public async Task<StepExecutionResult> RunMagentoCronAsync(string batchId)
+    public async Task<IActionResult> RunMagentoCronAsync(string batchId)
     {
-        var result = new StepExecutionResult
-        {
-            StartedAt = DateTime.UtcNow
-        };
+        var batch = await _batchRepo.GetByIdAsync(batchId);
+        var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
 
-        try
-        {
-            var batch = await _batchRepo.GetByIdAsync(batchId);
-            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+        if (customer?.Magento == null)
+            throw new Exception("Magento config mancante");
 
-            if (customer?.Magento == null)
-                throw new Exception("Magento config mancante");
+        var exporter = _magentoExporterFactory.Create(customer.Magento);
 
-            var _exporter = _magentoExporterFactory.Create(customer.Magento);
+        await exporter.RunMagentoCronAsync();
 
-            await _exporter.RunMagentoCronAsync();
-
-        }
-        catch (Exception e)
-        {
-            result.Success = false;
-            result.ErrorMessage = e.Message;
-        }
-
-        result.FinishedAt = DateTime.UtcNow;
-
-        return result;
+        return Ok("Cron eseguito");
     }
+
+    //--------------------------------------------------
+    // FINALIZE
+    //--------------------------------------------------
 
     [HttpGet("finalizeBatchAsync")]
-    public async Task<StepExecutionResult> FinalizeBatchAsync(string batchId)
+    public async Task<IActionResult> FinalizeBatchAsync(string batchId)
     {
-        var result = new StepExecutionResult
-        {
-            StartedAt = DateTime.UtcNow
-        };
+        await _batchFinalizer.FinalizeBatchAsync(batchId);
 
-        try
-        {
-            var batch = await _batchRepo.GetByIdAsync(batchId);
-            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
-
-            if (customer?.Magento == null)
-                throw new Exception("Magento config mancante");
-
-            var _exporter = _magentoExporterFactory.Create(customer.Magento);
-
-            await _batchFinalizer.FinalizeBatchAsync(batchId);
-        }
-        catch (Exception e)
-        {
-            result.Success = false;
-            result.ErrorMessage = e.Message;
-        }
-
-        result.FinishedAt = DateTime.UtcNow;
-
-        return result;
+        return Ok("Batch finalizzato");
     }
-
 }
