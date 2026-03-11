@@ -1,17 +1,42 @@
-﻿using MongoDB.Bson;
-using MongoDB.Driver;
-using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Shared.Enums;
+using HeronIntegration.Shared.Models;
+using MongoDB.Bson;
+using MongoDB.Driver;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public class BatchRepository : IBatchRepository
 {
     private readonly MongoContext _context;
+    private readonly IStepRepository _stepRepo;
+    private readonly ICustomerRepository _customerRepo;
+    private readonly IRawProductRepository _rawRepo;
+    private readonly IHostEnvironment _env;
+    private readonly IEnrichedProductRepository _enrichedRepo;
+    private readonly IResolvedProductRepository _resolvedRepo;
+    private readonly IExportRepository _exportRepo;
 
-    public BatchRepository(MongoContext context)
+
+    public BatchRepository(
+        MongoContext context,
+        IStepRepository stepRepo,
+        IHostEnvironment env,
+        ICustomerRepository customerRepo,
+        IRawProductRepository rawRepo,
+        IEnrichedProductRepository enrichedRepo,
+        IResolvedProductRepository resolvedRepo,
+        IExportRepository exportRepo
+        )
     {
         _context = context;
+        _stepRepo = stepRepo;
+        _env = env;
+        _customerRepo = customerRepo;
+        _rawRepo = rawRepo;
+        _enrichedRepo = enrichedRepo;
+        _resolvedRepo = resolvedRepo;
+        _exportRepo = exportRepo;
     }
 
     public async Task<List<BatchExecution>> GetLastAsync(int limit)
@@ -20,6 +45,15 @@ public class BatchRepository : IBatchRepository
             .Find(_ => true)
             .SortByDescending(x => x.StartedAt)
             .Limit(limit)
+            .ToListAsync();
+    }
+    public async Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId)
+    {
+        var todayStart = DateTime.UtcNow.Date;
+
+        return await _context.BatchExecutions
+            .Find(x => x.CustomerId == customerId && (x.StartedAt < todayStart || x.Status == BatchStatus.Closed))
+            .SortByDescending(x => x.StartedAt)
             .ToListAsync();
     }
     public async Task<BatchExecution?> GetByIdAsync(string batchId)
@@ -134,7 +168,7 @@ public class BatchRepository : IBatchRepository
         var tomorrow = todayStart.AddDays(1);
 
         return await _context.BatchExecutions
-            .Find(x => x.StartedAt >= todayStart && x.StartedAt < tomorrow)
+            .Find(x => x.StartedAt >= todayStart && x.StartedAt < tomorrow && x.Status == BatchStatus.Running)
             .SortByDescending(x => x.StartedAt)
             .ToListAsync();
     }
@@ -152,4 +186,97 @@ public class BatchRepository : IBatchRepository
             .SortByDescending(x => x.StartedAt)
             .ToListAsync();
     }
+
+    public async Task DeleteAsync(string id)
+    {
+        var objectId = ObjectId.Parse(id);
+
+        // cancella i prodotti raw collegati al batch
+        await _context.RawProducts.DeleteManyAsync(x => x.BatchId == objectId);
+
+        // cancella i prodotti enriched collegati al batch
+        await _context.EnrichedProducts.DeleteManyAsync(x => x.BatchId == objectId);
+
+        // cancella i prodotti resolved collegati al batch
+        await _context.ResolvedProducts.DeleteManyAsync(x => x.BatchId == objectId);
+
+        // cancella i prodotti export collegati al batch
+        await _context.ExportExecutions.DeleteManyAsync(x => x.BatchId == objectId);
+
+        // cancella gli step
+        await _context.StepExecutions.DeleteManyAsync(x => x.BatchId == objectId);
+
+        // cancella il report
+        await _context.BatchExecutions.DeleteOneAsync(x => x.Id == objectId);
+    }
+    public async Task<BatchDashboardItem> BuildBatchDashboard(BatchExecution batch)
+    {
+        var batchId = batch.Id.ToString();
+
+        var steps = await _stepRepo.GetByBatchAsync(batchId);
+
+        var currentStep = steps
+            .OrderByDescending(x => x.StartedAt)
+            .FirstOrDefault();
+
+        var rawTotal = await _rawRepo.CountByBatchAsync(batchId);
+        var enrichedTotal = await _enrichedRepo.CountByBatchAsync(batchId);
+        var resolvedTotal = await _resolvedRepo.CountByBatchAsync(batchId);
+
+        var export = await _exportRepo.GetByBatchAsync(batchId);
+        var exportTotal = export.Count();
+
+        var exportPending = export.Where(a => a.Status == ExportStatus.Pending).Count();
+        var exportSuccess = export.Where(a => a.Status == ExportStatus.Success).Count();
+        var exportInsert = export.Where(a => a.Status == ExportStatus.Insert).Count();
+        var exportUpdatePrice = export.Where(a => a.Status == ExportStatus.UpdatePrice).Count();
+        var exportInsertImage = export.Where(a => a.Status == ExportStatus.InsertImages).Count();
+        var exportError = export.Where(a => a.Status == ExportStatus.Error).Count();
+
+        var exportErrors = await _exportRepo.CountErrorsAsync(batchId);
+
+        var customer = await _customerRepo.GetByIdAsync(batch.CustomerId);
+
+        return new BatchDashboardItem
+        {
+            BatchId = batchId,
+            SequenceNumber = batch.SequenceNumber,
+            Customer = customer!,
+            StartedAt = batch.StartedAt,
+            Status = batch.Status,
+
+            CurrentStep = currentStep?.Step ?? "",
+            StepStatus = currentStep?.Status ?? StepStatus.Pending,
+
+            HeronImport = new StepMetrics
+            {
+                Total = rawTotal,
+                Success = rawTotal
+            },
+
+            Farmadati = new StepMetrics
+            {
+                Total = rawTotal,
+                Success = enrichedTotal
+            },
+
+            Suppliers = new StepMetrics
+            {
+                Total = rawTotal,
+                Success = resolvedTotal
+            },
+
+            Magento = new StepMetricsMagento
+            {
+                Total = exportTotal,
+                Success = exportSuccess,
+                Errors = exportErrors,
+                InsertImages = exportInsertImage,
+                Insert = exportInsert,
+                UpdatePrice = exportUpdatePrice,
+                Pending = exportPending
+            }
+        };
+    }
+
 }

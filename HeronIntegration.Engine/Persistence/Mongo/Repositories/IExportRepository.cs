@@ -35,4 +35,9 @@ public interface IExportRepository
 
     Task<List<ExportExecution>> GetByBatchAsync(string batchId);
 
+    Task SetStatusBatchAsync(string batchId, ExportStatus exportStatus = ExportStatus.Pending);
+
+    Task DeleteByBatchAsync(string batchId);
+
+
 }

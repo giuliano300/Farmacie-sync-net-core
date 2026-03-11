@@ -69,6 +69,8 @@ public class MagentoController : ControllerBase
     public async Task<IActionResult> MassiveImport(string batchId)
     {
         await _cleanupService.updateExportExecution(batchId);
+        await _exportRepo.SetStatusBatchAsync(batchId, ExportStatus.Pending);
+
 
         var step = await _stepRepo.GetStepAsync(batchId, "Magento");
 
@@ -119,6 +121,7 @@ public class MagentoController : ControllerBase
                 var mongoDict = mappedList.ToDictionary(x => x.Aic);
 
                 var toUpsert = new List<ResolvedProduct>();
+                var toDisabled = new List<MagentoSlimProduct>();
 
                 foreach (var product in mappedList)
                 {
@@ -130,14 +133,31 @@ public class MagentoController : ControllerBase
                         continue;
                     }
 
-                    if (magentoProduct.Price != product.Price)
-                        toUpsert.Add(product);
                 }
+                // prodotti presenti su Magento ma NON nel mapping
+                var mappedAics = mappedList.Select(x => x.Aic).ToHashSet();
+                foreach (var magentoProduct in magentoDict.Values)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    if (!mappedAics.Contains(magentoProduct.Sku))
+                    {
+                        toDisabled.Add(magentoProduct);
+                    }
+                }
+
 
                 token.ThrowIfCancellationRequested();
 
                 if (toUpsert.Any())
                     await exporter.ImportProductsAsync(toUpsert);
+
+                if (toDisabled.Any())
+                    await exporter.DisableProductsAsync(toDisabled.Select(a => a.Sku).ToList());
+
+                token.ThrowIfCancellationRequested();
+
+                await _exportRepo.SetStatusBatchAsync(batchId, ExportStatus.Insert);
 
                 token.ThrowIfCancellationRequested();
 
@@ -282,15 +302,20 @@ public class MagentoController : ControllerBase
     [HttpGet("runMagentoCronAsync")]
     public async Task<IActionResult> RunMagentoCronAsync(string batchId)
     {
-        var batch = await _batchRepo.GetByIdAsync(batchId);
-        var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+        var token = StartProcess(batchId);
 
-        if (customer?.Magento == null)
-            throw new Exception("Magento config mancante");
+        _ = Task.Run(async () =>
+        {
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
 
-        var exporter = _magentoExporterFactory.Create(customer.Magento);
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
 
-        await exporter.RunMagentoCronAsync();
+            var exporter = _magentoExporterFactory.Create(customer.Magento);
+
+            await exporter.RunMagentoCronAsync();
+        }, token);
 
         return Ok("Cron eseguito");
     }
@@ -302,7 +327,13 @@ public class MagentoController : ControllerBase
     [HttpGet("finalizeBatchAsync")]
     public async Task<IActionResult> FinalizeBatchAsync(string batchId)
     {
-        await _batchFinalizer.FinalizeBatchAsync(batchId);
+        var token = StartProcess(batchId);
+
+        _ = Task.Run(async () =>
+        {
+            await RunMagentoCronAsync(batchId);
+            await _batchFinalizer.FinalizeBatchAsync(batchId);
+        }, token);
 
         return Ok("Batch finalizzato");
     }

@@ -128,26 +128,40 @@ public class ExportRepository : IExportRepository
         );
     }
 
+    public async Task SetStatusBatchAsync(string batchId, ExportStatus exportStatus = ExportStatus.Pending)
+    {
+        await _context.ExportExecutions.UpdateManyAsync(
+            x => x.BatchId == ObjectId.Parse(batchId),
+            Builders<ExportExecution>.Update
+                .Set(x => x.Status, exportStatus)
+        );
+    }
+
     public async Task<BatchReport> BuildBatchReportAsync(string batchId)
     {
-        var total = await _context.ExportExecutions.CountDocumentsAsync(
+        var total = await _context.ExportExecutions.Find(
             x => x.BatchId == ObjectId.Parse(batchId)
-        );
+        ).ToListAsync();
 
-        var success = await _context.ExportExecutions.CountDocumentsAsync(
-            x => x.BatchId == ObjectId.Parse(batchId) && x.Status == ExportStatus.Success
-        );
+        var success = total.Count(a => a.Status == ExportStatus.Success);
 
-        var errors = await _context.ExportExecutions.CountDocumentsAsync(
-            x => x.BatchId == ObjectId.Parse(batchId) && x.Status == ExportStatus.Error
-        );
+        var import = total.Count(a => a.Status == ExportStatus.Insert || a.Status == ExportStatus.UpdatePrice);
+
+        var prices = total.Count(a => a.Status == ExportStatus.UpdatePrice);
+
+        var images = total.Count(a => a.Status == ExportStatus.InsertImages);
+
+        var errors = total.Count(a => a.Status == ExportStatus.Error);
 
         var report = new BatchReport
         {
             BatchId = batchId,
             FinishedAt = DateTime.UtcNow,
-            TotalProducts = (int)total,
-            Success = (int)success,
+            TotalProducts = (int)total.Count(),
+            Insert = (int)import,
+            UpdatePrice = (int)prices,
+            InsertImages = (int)images,
+            Complete = (int)success,
             Errors = (int)errors
         };
 
@@ -184,4 +198,11 @@ public class ExportRepository : IExportRepository
                 x.BatchId == ObjectId.Parse(batchId) &&
                 x.Status == ExportStatus.Error);
     }
+
+    public async Task DeleteByBatchAsync(string batchId)
+    {
+        var filter = Builders<RawProduct>.Filter.Eq("BatchId", ObjectId.Parse(batchId));
+        await _context.RawProducts.DeleteManyAsync(filter);
+    }
+
 }

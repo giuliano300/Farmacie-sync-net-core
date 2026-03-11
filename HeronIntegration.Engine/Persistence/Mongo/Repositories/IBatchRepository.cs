@@ -1,4 +1,5 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+using HeronIntegration.Shared.Models;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -28,5 +29,10 @@ public interface IBatchRepository
 
     Task<List<BatchExecution>> GetTodayAsync();
     Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId);
+    Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId);
+
+    Task<BatchDashboardItem> BuildBatchDashboard(BatchExecution batch);
+
+    Task DeleteAsync(string id);
 
 }

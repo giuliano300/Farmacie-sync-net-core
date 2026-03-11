@@ -8,4 +8,8 @@ public interface IBatchReportRepository
 
     Task InsertOneAsync(BatchReport report);
 
+    Task<BatchReport> GetBatchesAsync(string batchId);
+
+
+    Task<BatchReport?> GetByIdAsync(string id);
 }
