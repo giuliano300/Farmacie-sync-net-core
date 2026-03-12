@@ -442,7 +442,7 @@ public class MagentoExporter : IMagentoExporter
         var result = new List<MagentoSlimProduct>();
 
         int page = 1;
-        const int pageSize = 350;
+        const int pageSize = 300;
         int total;
 
         try
