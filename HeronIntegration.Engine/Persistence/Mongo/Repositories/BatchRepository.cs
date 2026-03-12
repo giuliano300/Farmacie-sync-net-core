@@ -3,6 +3,7 @@ using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using System.Collections.Concurrent;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
@@ -16,7 +17,7 @@ public class BatchRepository : IBatchRepository
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
     private readonly IExportRepository _exportRepo;
-
+    private readonly BatchProcessManager _processManager;
 
     public BatchRepository(
         MongoContext context,
@@ -26,7 +27,8 @@ public class BatchRepository : IBatchRepository
         IRawProductRepository rawRepo,
         IEnrichedProductRepository enrichedRepo,
         IResolvedProductRepository resolvedRepo,
-        IExportRepository exportRepo
+        IExportRepository exportRepo,
+        BatchProcessManager processManager
         )
     {
         _context = context;
@@ -37,6 +39,7 @@ public class BatchRepository : IBatchRepository
         _enrichedRepo = enrichedRepo;
         _resolvedRepo = resolvedRepo;
         _exportRepo = exportRepo;
+        _processManager = processManager;
     }
 
     public async Task<List<BatchExecution>> GetLastAsync(int limit)
@@ -191,6 +194,8 @@ public class BatchRepository : IBatchRepository
     {
         var objectId = ObjectId.Parse(id);
 
+        _processManager.Stop(id);
+
         // cancella i prodotti raw collegati al batch
         await _context.RawProducts.DeleteManyAsync(x => x.BatchId == objectId);
 
@@ -213,29 +218,76 @@ public class BatchRepository : IBatchRepository
     {
         var batchId = batch.Id.ToString();
 
-        var steps = await _stepRepo.GetByBatchAsync(batchId);
+        // Query parallele
+        var stepsTask = _stepRepo.GetByBatchAsync(batchId);
+        var rawTask = _rawRepo.CountByBatchAsync(batchId);
+        var enrichedTask = _enrichedRepo.CountByBatchAsync(batchId);
+        var resolvedTask = _resolvedRepo.CountByBatchAsync(batchId);
+        var exportTask = _exportRepo.GetByBatchAsync(batchId);
+        var exportErrorsTask = _exportRepo.CountErrorsAsync(batchId);
+        var customerTask = _customerRepo.GetByIdAsync(batch.CustomerId);
+
+        await Task.WhenAll(
+            stepsTask,
+            rawTask,
+            enrichedTask,
+            resolvedTask,
+            exportTask,
+            exportErrorsTask,
+            customerTask
+        );
+
+        var steps = stepsTask.Result;
+        var rawTotal = rawTask.Result;
+        var enrichedTotal = enrichedTask.Result;
+        var resolvedTotal = resolvedTask.Result;
+        var export = exportTask.Result;
+        var exportErrors = exportErrorsTask.Result;
+        var customer = customerTask.Result;
 
         var currentStep = steps
             .OrderByDescending(x => x.StartedAt)
             .FirstOrDefault();
 
-        var rawTotal = await _rawRepo.CountByBatchAsync(batchId);
-        var enrichedTotal = await _enrichedRepo.CountByBatchAsync(batchId);
-        var resolvedTotal = await _resolvedRepo.CountByBatchAsync(batchId);
-
-        var export = await _exportRepo.GetByBatchAsync(batchId);
         var exportTotal = export.Count();
 
-        var exportPending = export.Where(a => a.Status == ExportStatus.Pending).Count();
-        var exportSuccess = export.Where(a => a.Status == ExportStatus.Success).Count();
-        var exportInsert = export.Where(a => a.Status == ExportStatus.Insert).Count();
-        var exportUpdatePrice = export.Where(a => a.Status == ExportStatus.UpdatePrice).Count();
-        var exportInsertImage = export.Where(a => a.Status == ExportStatus.InsertImages).Count();
-        var exportError = export.Where(a => a.Status == ExportStatus.Error).Count();
+        // calcolo metriche export in un solo passaggio
+        int exportPending = 0;
+        int exportSuccess = 0;
+        int exportInsert = 0;
+        int exportUpdatePrice = 0;
+        int exportInsertImage = 0;
+        int exportError = 0;
 
-        var exportErrors = await _exportRepo.CountErrorsAsync(batchId);
+        foreach (var e in export)
+        {
+            switch (e.Status)
+            {
+                case ExportStatus.Pending:
+                    exportPending++;
+                    break;
 
-        var customer = await _customerRepo.GetByIdAsync(batch.CustomerId);
+                case ExportStatus.Success:
+                    exportSuccess++;
+                    break;
+
+                case ExportStatus.Insert:
+                    exportInsert++;
+                    break;
+
+                case ExportStatus.UpdatePrice:
+                    exportUpdatePrice++;
+                    break;
+
+                case ExportStatus.InsertImages:
+                    exportInsertImage++;
+                    break;
+
+                case ExportStatus.Error:
+                    exportError++;
+                    break;
+            }
+        }
 
         return new BatchDashboardItem
         {
@@ -278,5 +330,4 @@ public class BatchRepository : IBatchRepository
             }
         };
     }
-
 }

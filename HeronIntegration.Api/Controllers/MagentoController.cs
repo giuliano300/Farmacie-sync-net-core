@@ -18,8 +18,7 @@ public class MagentoController : ControllerBase
     private readonly IBatchRepository _batchRepo;
     private readonly ICleanupService _cleanupService;
     private readonly IStepRepository _stepRepo;
-
-    private static readonly ConcurrentDictionary<string, CancellationTokenSource> _runningApiProcesses = new();
+    private readonly BatchProcessManager _processManager;
 
     public MagentoController(
         IResolvedProductRepository resolvedRepo,
@@ -29,7 +28,8 @@ public class MagentoController : ControllerBase
         ICustomerRepository customerRepo,
         IBatchFinalizerService batchFinalizer,
         ICleanupService cleanupService,
-        IStepRepository stepRepo)
+        IStepRepository stepRepo,
+        BatchProcessManager processManager)
     {
         _resolvedRepo = resolvedRepo;
         _exportRepo = exportRepo;
@@ -39,27 +39,9 @@ public class MagentoController : ControllerBase
         _batchRepo = batchRepo;
         _cleanupService = cleanupService;
         _stepRepo = stepRepo;
+        _processManager = processManager;
     }
 
-    //--------------------------------------------------
-    // STOP PROCESSI PRECEDENTI
-    //--------------------------------------------------
-
-    private void CancelRunningProcess(string batchId)
-    {
-        if (_runningApiProcesses.TryRemove(batchId, out var existing))
-            existing.Cancel();
-    }
-
-    private CancellationToken StartProcess(string batchId)
-    {
-        CancelRunningProcess(batchId);
-
-        var cts = new CancellationTokenSource();
-        _runningApiProcesses[batchId] = cts;
-
-        return cts.Token;
-    }
 
     //--------------------------------------------------
     // MASSIVE IMPORT
@@ -79,7 +61,7 @@ public class MagentoController : ControllerBase
 
         await _stepRepo.SetRunningAsync(step.Id.ToString());
 
-        var token = StartProcess(batchId);
+        var token = _processManager.Start(batchId);
 
         _ = Task.Run(async () =>
         {
@@ -95,7 +77,7 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                var magentoMetadata = await exporter.GetMagentoMetadataAsync();
+                var magentoMetadata = await exporter.GetMagentoMetadataAsync(token);
 
                 var magentoDict = magentoMetadata.magentoProducts!
                     .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
@@ -150,10 +132,10 @@ public class MagentoController : ControllerBase
                 token.ThrowIfCancellationRequested();
 
                 if (toUpsert.Any())
-                    await exporter.ImportProductsAsync(toUpsert);
+                    await exporter.ImportProductsAsync(toUpsert, token);
 
                 if (toDisabled.Any())
-                    await exporter.DisableProductsAsync(toDisabled.Select(a => a.Sku).ToList());
+                    await exporter.DisableProductsAsync(toDisabled.Select(a => a.Sku).ToList(), token);
 
                 token.ThrowIfCancellationRequested();
 
@@ -165,11 +147,11 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                await exporter.UpdateImageBulkAsync(mappedList);
+                await exporter.UpdateImageBulkAsync(mappedList, token);
 
                 token.ThrowIfCancellationRequested();
 
-                await exporter.RunMagentoCronAsync();
+                await exporter.RunMagentoCronAsync(token);
 
                 await _batchFinalizer.FinalizeBatchAsync(batchId);
             }
@@ -196,7 +178,7 @@ public class MagentoController : ControllerBase
     {
         await _cleanupService.updateExportExecution(batchId, ExportStatus.Insert);
 
-        var token = StartProcess(batchId);
+        var token = _processManager.Start(batchId);
 
         _ = Task.Run(async () =>
         {
@@ -241,11 +223,11 @@ public class MagentoController : ControllerBase
             Qty = p.Availability
         }).ToList();
 
-        await exporter.UpdateStockBulkAsync(list);
+        await exporter.UpdateStockBulkAsync(list, token);
 
         token.ThrowIfCancellationRequested();
 
-        await exporter.RunMagentoCronAsync();
+        await exporter.RunMagentoCronAsync(token);
     }
 
     //--------------------------------------------------
@@ -257,7 +239,7 @@ public class MagentoController : ControllerBase
     {
         await _cleanupService.updateExportExecution(batchId, ExportStatus.UpdatePrice);
 
-        var token = StartProcess(batchId);
+        var token = _processManager.Start(batchId);
 
         _ = Task.Run(async () =>
         {
@@ -275,11 +257,11 @@ public class MagentoController : ControllerBase
 
                 var list = await _resolvedRepo.GetByBatchAsync(batchId);
 
-                await exporter.UpdateImageBulkAsync(list);
+                await exporter.UpdateImageBulkAsync(list, token);
 
                 token.ThrowIfCancellationRequested();
 
-                await exporter.RunMagentoCronAsync();
+                await exporter.RunMagentoCronAsync(token);
             }
             catch (OperationCanceledException)
             {
@@ -302,7 +284,7 @@ public class MagentoController : ControllerBase
     [HttpGet("runMagentoCronAsync")]
     public async Task<IActionResult> RunMagentoCronAsync(string batchId)
     {
-        var token = StartProcess(batchId);
+        var token = _processManager.Start(batchId);
 
         _ = Task.Run(async () =>
         {
@@ -314,7 +296,7 @@ public class MagentoController : ControllerBase
 
             var exporter = _magentoExporterFactory.Create(customer.Magento);
 
-            await exporter.RunMagentoCronAsync();
+            await exporter.RunMagentoCronAsync(token);
         }, token);
 
         return Ok("Cron eseguito");
@@ -327,7 +309,7 @@ public class MagentoController : ControllerBase
     [HttpGet("finalizeBatchAsync")]
     public async Task<IActionResult> FinalizeBatchAsync(string batchId)
     {
-        var token = StartProcess(batchId);
+        var token = _processManager.Start(batchId);
 
         _ = Task.Run(async () =>
         {

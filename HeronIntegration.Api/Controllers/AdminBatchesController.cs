@@ -20,6 +20,7 @@ public class BatchController : ControllerBase
     private readonly FarmadatiEnrichmentStepProcessor _farmadatiProcessor;
     private readonly SupplierResolutionStepProcessor _supplierProcessor;
     private readonly MagentoExportStepProcessor _magentoProcessor;
+    private readonly BatchProcessManager _processManager;
 
     public BatchController(
         IBatchRepository batchRepo,
@@ -29,7 +30,8 @@ public class BatchController : ControllerBase
         HeronImportStepProcessor heronProcessor,
         FarmadatiEnrichmentStepProcessor farmadatiProcessor,
         SupplierResolutionStepProcessor supplierProcessor,
-        MagentoExportStepProcessor magentoProcessor
+        MagentoExportStepProcessor magentoProcessor,
+        BatchProcessManager processManager
         )
     {
         _batchRepo = batchRepo;
@@ -40,6 +42,7 @@ public class BatchController : ControllerBase
         _farmadatiProcessor = farmadatiProcessor;
         _supplierProcessor = supplierProcessor;
         _magentoProcessor = magentoProcessor;
+        _processManager = processManager;
     }
 
     [HttpGet]
@@ -105,21 +108,23 @@ public class BatchController : ControllerBase
     {
         try
         {
+            var token = _processManager.Start(batchId);
+
             await _stepRepo.ResetStepsAsync(batchId);
             var step = await _stepRepo.GetByIdAsync(stepId);
             switch (step!.Step.ToUpper())
             {
                 case "HERONIMPORT":
-                    await _heronProcessor.ExecuteAsync(batchId);
+                    await _heronProcessor.ExecuteAsync(batchId, token);
                     break;
                 case "FARMADATI":
-                    await _farmadatiProcessor.ExecuteAsync(batchId);
+                    await _farmadatiProcessor.ExecuteAsync(batchId, token);
                     break;
                 case "SUPPLIERS":
-                    await _supplierProcessor.ExecuteAsync(batchId);
+                    await _supplierProcessor.ExecuteAsync(batchId, token);
                     break;
                 case "MAGENTO":
-                    await _magentoProcessor.ExecuteAsync(batchId);
+                    await _magentoProcessor.ExecuteAsync(batchId, token);
                     break;
             }
             await _batchRepo.SetRunningAsync(batchId);
@@ -138,8 +143,10 @@ public class BatchController : ControllerBase
     {
         try
         {
+            var token = _processManager.Start(batchId);
+
             await _batchRepo.SetRunningAsync(batchId);
-            await _heronProcessor.ExecuteAsync(batchId);
+            await _heronProcessor.ExecuteAsync(batchId, token);
             return true;
         }
         catch(Exception e)

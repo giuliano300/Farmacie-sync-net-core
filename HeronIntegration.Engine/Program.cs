@@ -129,7 +129,8 @@ builder.Services.AddScoped<ProducerMappingRepository>();
 
 
 builder.Services.AddHttpClient();
-builder.Services.AddScoped<IMagentoExporterFactory, MagentoExporterFactory>();
+builder.Services.AddHttpClient<IMagentoExporterFactory, MagentoExporterFactory>();
+builder.Services.AddSingleton<BatchProcessManager>();
 
 
 var host = builder.Build();

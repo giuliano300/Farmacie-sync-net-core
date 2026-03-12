@@ -18,7 +18,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly MagentoConfig _magento;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
 
-    private const int MaxParallel = 15;
+    private const int MaxParallel = 8;
 
     public MagentoExporter(
         HttpClient http,
@@ -33,18 +33,22 @@ public class MagentoExporter : IMagentoExporter
         _exportRepo = exportRepo;
         _magento = magento;
 
+        _http.Timeout = TimeSpan.FromMinutes(10);
+
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", _magento.Token);
     }
 
     // =====================================================
     // 🔹 EXPORT SINGOLO (ORA USA PUT → UPSERT PIÙ VELOCE)
     // =====================================================
-    public async Task<MagentoInsertResult> ExportAsync(ResolvedProduct p)
+    public async Task<MagentoInsertResult> ExportAsync(ResolvedProduct p, CancellationToken token)
     {
         var result = new MagentoInsertResult();
 
         try
         {
-            await UpsertProductAsync(p);
+            await UpsertProductAsync(p, token);
             result.Success = true;
         }
         catch (Exception ex)
@@ -59,30 +63,34 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🚀 IMPORT MASSIVO PARALLELO (NUOVO)
     // =====================================================
-    public async Task ImportProductsAsync(IEnumerable<ResolvedProduct> products)
+    public async Task ImportProductsAsync(IEnumerable<ResolvedProduct> products, CancellationToken token)
     {
-        using var semaphore = new SemaphoreSlim(MaxParallel);
-
-        var tasks = products.Select(async p =>
+        try
         {
-            await semaphore.WaitAsync();
-            try
-            {
-                await UpsertProductAsync(p);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
+            await Parallel.ForEachAsync(
+                products,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = MaxParallel,
+                    CancellationToken = token
+                },
+                async (p, ct) =>
+                {
+                    ct.ThrowIfCancellationRequested();
 
-        await Task.WhenAll(tasks);
+                    await UpsertProductAsync(p, ct);
+                });
+        }
+        catch (OperationCanceledException)
+        {
+            // cancellazione batch → uscita pulita
+        }
     }
 
     // =====================================================
     // 🔥 UPSERT PRODOTTO (PUT SEMPRE)
     // =====================================================
-    private async Task UpsertProductAsync(ResolvedProduct p)
+    private async Task UpsertProductAsync(ResolvedProduct p, CancellationToken token)
     {
         var payload = new
         {
@@ -94,16 +102,13 @@ public class MagentoExporter : IMagentoExporter
             $"{BaseUrl}/rest/V1/products/{p.Aic}"
         );
 
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", _magento.Token);
-
         request.Content = new StringContent(
             JsonSerializer.Serialize(payload),
             Encoding.UTF8,
             "application/json"
         );
 
-        await SendAsync(request);
+        await SendAsync(request, token);
 
         //await UpdateQuantityAsync(p.Aic, p.Availability);
     }
@@ -111,28 +116,35 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🔁 HTTP SAFE SEND
     // =====================================================
-    private async Task SendAsync(HttpRequestMessage request)
+    private async Task SendAsync(HttpRequestMessage request, CancellationToken token)
     {
-        var response = await _http.SendAsync(request);
-
-        if (!response.IsSuccessStatusCode)
+        try
         {
-            var body = await response.Content.ReadAsStringAsync();
-            throw new Exception(body);
+            var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(token);
+                throw new Exception(body);
+            }
+        }
+        catch (TaskCanceledException) when (token.IsCancellationRequested)
+        {
+            throw new OperationCanceledException();
         }
     }
 
     // =====================================================
     // 🖼 UPLOAD IMMAGINI  
     // =====================================================
-    public async Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct p)
+    public async Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct p, CancellationToken token)
     {
         var result = new MagentoInsertResult();
 
         try
         {
             // Cancella immagini esistenti
-            await DeleteExistingImagesAsync(p.Aic);
+            await DeleteExistingImagesAsync(p.Aic, token);
 
             if (p.Images == null || !p.Images.Any())
             {
@@ -184,7 +196,7 @@ public class MagentoExporter : IMagentoExporter
                     "application/json"
                 );
 
-                await SendAsync(request);
+                await SendAsync(request, token);
             }
 
             await _exportRepo.SetStatusAsync(p.BatchId.ToString(), p.Aic, ExportStatus.InsertImages);
@@ -247,7 +259,7 @@ public class MagentoExporter : IMagentoExporter
         };
     }
 
-    private async Task UpdateQuantityAsync(string batchId, string sku, int qty)
+    private async Task UpdateQuantityAsync(string batchId, string sku, int qty, CancellationToken token)
     {
         var payload = new
         {
@@ -276,7 +288,7 @@ public class MagentoExporter : IMagentoExporter
 
         //var j = JsonSerializer.Serialize(payload);
 
-        var response = await _http.SendAsync(req);
+        var response = await _http.SendAsync(req, token);
 
         await _exportRepo.SetStatusAsync(batchId, sku, ExportStatus.UpdatePrice);
 
@@ -302,7 +314,7 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🔹 GET ATTRIBUTE OPTIONS
     // =====================================================
-    public async Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode)
+    public async Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode, CancellationToken token)
     {
         var url = $"{BaseUrl}/rest/V1/products/attributes/{attributeCode}/options";
 
@@ -311,7 +323,7 @@ public class MagentoExporter : IMagentoExporter
         request.Headers.Authorization =
             new AuthenticationHeaderValue("Bearer", _magento.Token);
 
-        var response = await _http.SendAsync(request);
+        var response = await _http.SendAsync(request, token);
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -332,7 +344,7 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🔹 GET CATEGORY MAP (FLATTEN TREE)
     // =====================================================
-    public async Task<Dictionary<string, int>> GetCategoryMapAsync()
+    public async Task<Dictionary<string, int>> GetCategoryMapAsync(CancellationToken token)
     {
         var request = new HttpRequestMessage(
             HttpMethod.Get,
@@ -342,7 +354,7 @@ public class MagentoExporter : IMagentoExporter
         request.Headers.Authorization =
             new AuthenticationHeaderValue("Bearer", _magento.Token);
 
-        var response = await _http.SendAsync(request);
+        var response = await _http.SendAsync(request, token);
         var json = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -383,7 +395,7 @@ public class MagentoExporter : IMagentoExporter
     }
 
 
-    public async Task RunMagentoCronAsync()
+    public async Task RunMagentoCronAsync(CancellationToken token)
     {
         try
         {
@@ -425,18 +437,20 @@ public class MagentoExporter : IMagentoExporter
     }
 
 
-    public async Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync()
+    public async Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(CancellationToken token)
     {
         var result = new List<MagentoSlimProduct>();
 
         int page = 1;
-        const int pageSize = 200;
+        const int pageSize = 350;
         int total;
 
         try
         {
             do
             {
+                token.ThrowIfCancellationRequested();
+
                 var url =
                     $"{BaseUrl}/rest/V1/products?" +
                     $"searchCriteria[currentPage]={page}&" +
@@ -444,11 +458,9 @@ public class MagentoExporter : IMagentoExporter
                     $"fields=items[sku,price,custom_attributes[attribute_code,value],extension_attributes[category_links[category_id]]],total_count";
 
                 var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", _magento.Token);
 
-                var response = await _http.SendAsync(request);
-                var json = await response.Content.ReadAsStringAsync();
+                var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                var json = await response.Content.ReadAsStringAsync(token);
 
                 if (!response.IsSuccessStatusCode)
                     throw new Exception(json);
@@ -493,7 +505,7 @@ public class MagentoExporter : IMagentoExporter
         return result;
     }
 
-    public async Task DisableProductsAsync(List<string> skus)
+    public async Task DisableProductsAsync(List<string> skus, CancellationToken token)
     {
         if (skus == null || skus.Count == 0)
             return;
@@ -502,16 +514,17 @@ public class MagentoExporter : IMagentoExporter
 
         var tasks = skus.Select(async sku =>
         {
-            await semaphore.WaitAsync();
+            await semaphore.WaitAsync(token);
 
             try
             {
-                await DisableProductAsync(sku);
+                token.ThrowIfCancellationRequested();
+
+                await DisableProductAsync(sku, token);
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
             {
-                // puoi loggare qui se vuoi
-                Console.WriteLine($"Errore disabilitando SKU {sku}: {ex.Message}");
+                // cancellazione → ignora
             }
             finally
             {
@@ -561,7 +574,7 @@ public class MagentoExporter : IMagentoExporter
         return result;
     }
 
-    private async Task DisableProductAsync(string sku)
+    private async Task DisableProductAsync(string sku, CancellationToken token)
     {
         var payload = new
         {
@@ -586,7 +599,7 @@ public class MagentoExporter : IMagentoExporter
             "application/json"
         );
 
-        var response = await _http.SendAsync(request);
+        var response = await _http.SendAsync(request, token);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -595,47 +608,61 @@ public class MagentoExporter : IMagentoExporter
         }
     }
 
-    public async Task UpdateStockBulkAsync(List<InventoryItem> items)
+    public async Task UpdateStockBulkAsync(List<InventoryItem> items, CancellationToken token)
     {
         using var semaphore = new SemaphoreSlim(MaxParallel);
 
         var tasks = items.Select(async item =>
         {
-            await semaphore.WaitAsync();
+            await semaphore.WaitAsync(token);
             try
             {
-                await UpdateQuantityAsync(item.Id, item.Sku, item.Qty);
+                await semaphore.WaitAsync(token);
+
+                token.ThrowIfCancellationRequested();
+
+                await UpdateQuantityAsync(item.Id, item.Sku, item.Qty, token);
+            }
+            catch (OperationCanceledException)
+            {
+                // cancellazione → ignora
             }
             finally
             {
-                semaphore.Release();
+                if (semaphore.CurrentCount < MaxParallel)
+                    semaphore.Release();
             }
         });
 
         await Task.WhenAll(tasks);
     }
 
-    public async Task UpdateImageBulkAsync(List<ResolvedProduct> items)
+    public async Task UpdateImageBulkAsync(List<ResolvedProduct> items, CancellationToken token)
     {
         using var semaphore = new SemaphoreSlim(MaxParallel);
 
         var tasks = items.Select(async p =>
         {
-            await semaphore.WaitAsync();
+            await semaphore.WaitAsync(token);
             try
             {
-                await UploadImagesAsync(p);
+                await semaphore.WaitAsync(token);
+
+                token.ThrowIfCancellationRequested();
+
+                await UploadImagesAsync(p, token);
             }
             finally
             {
-                semaphore.Release();
+                if (semaphore.CurrentCount < MaxParallel)
+                    semaphore.Release();
             }
         });
 
         await Task.WhenAll(tasks);
     }
 
-    private async Task DeleteExistingImagesAsync(string sku)
+    private async Task DeleteExistingImagesAsync(string sku, CancellationToken token)
     {
         var getRequest = new HttpRequestMessage(
             HttpMethod.Get,
@@ -645,7 +672,7 @@ public class MagentoExporter : IMagentoExporter
         getRequest.Headers.Authorization =
             new AuthenticationHeaderValue("Bearer", _magento.Token);
 
-        var response = await _http.SendAsync(getRequest);
+        var response = await _http.SendAsync(getRequest, token);
 
         var content = await response.Content.ReadAsStringAsync();
 
@@ -664,19 +691,19 @@ public class MagentoExporter : IMagentoExporter
             deleteRequest.Headers.Authorization =
                 new AuthenticationHeaderValue("Bearer", _magento.Token);
 
-            await SendAsync(deleteRequest);
+            await SendAsync(deleteRequest, token);
         }
     }
 
-    public async Task<MagentoMetadata> GetMagentoMetadataAsync()
+    public async Task<MagentoMetadata> GetMagentoMetadataAsync(CancellationToken token)
     {
         // =====================================================
         // CARICAMENTO METADATI MAGENTO
         // =====================================================
-        var manufacturersTask = GetAttributeOptionsAsync("manufacturer");
-        var suppliersTask = GetAttributeOptionsAsync("supplier");
-        var categoriesTask = GetCategoryMapAsync();
-        var magentoProductsTask = GetMagentoProductsSlimAsync();
+        var manufacturersTask = GetAttributeOptionsAsync("manufacturer", token);
+        var suppliersTask = GetAttributeOptionsAsync("supplier", token);
+        var categoriesTask = GetCategoryMapAsync(token);
+        var magentoProductsTask = GetMagentoProductsSlimAsync(token);
 
         await Task.WhenAll(
             manufacturersTask,
@@ -684,6 +711,8 @@ public class MagentoExporter : IMagentoExporter
             categoriesTask,
             magentoProductsTask
         );
+
+        token.ThrowIfCancellationRequested();
 
         var manufacturers = manufacturersTask.Result
             .Where(x => !string.IsNullOrWhiteSpace(x.Key))
@@ -726,7 +755,8 @@ public class MagentoExporter : IMagentoExporter
 
     public int? ResolveCategoryId(
         Dictionary<string, int> categoryMap,
-        string categoryName)
+        string categoryName,
+        CancellationToken token)
             {
                 var match = categoryMap
                     .FirstOrDefault(x =>
@@ -745,7 +775,5 @@ public class MagentoExporter : IMagentoExporter
                 }
                 return match.Value;
             }
-
-
 
 }

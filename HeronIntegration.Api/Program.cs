@@ -158,6 +158,8 @@ builder.Services.AddScoped<HeronImportStepProcessor>();
 builder.Services.AddScoped<FarmadatiEnrichmentStepProcessor>();
 builder.Services.AddScoped<SupplierResolutionStepProcessor>();
 builder.Services.AddScoped<MagentoExportStepProcessor>();
+builder.Services.AddSingleton<BatchProcessManager>();
+
 
 builder.Services.AddCors(options =>
 {

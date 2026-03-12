@@ -6,5 +6,5 @@ public interface IStepProcessor
 {
     string Step { get; }
 
-    Task<StepExecutionResult> ExecuteAsync(string batchId);
+    Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token);
 }

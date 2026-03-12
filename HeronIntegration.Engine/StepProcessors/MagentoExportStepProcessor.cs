@@ -39,7 +39,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
     }
 
-    public async Task<StepExecutionResult> ExecuteAsync(string batchId)
+    public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token)
     {
         var result = new StepExecutionResult
         {
@@ -72,7 +72,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             // =====================================================
             // CARICAMENTO METADATI MAGENTO
             // =====================================================
-            var magentoMetatada = await _exporter.GetMagentoMetadataAsync();
+            var magentoMetatada = await _exporter.GetMagentoMetadataAsync(token);
 
             var magentoDict = magentoMetatada.magentoProducts!
                 .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
@@ -101,7 +101,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                                         ? manufacturerId.ToString()
                                         : "0",
                     SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
-                                   _exporter.ResolveCategoryId(magentoMetatada.categories!, p.SubCategory) is int categoryId)
+                                   _exporter.ResolveCategoryId(magentoMetatada.categories!, p.SubCategory, token) is int categoryId)
                                         ? categoryId.ToString()
                                         : null,
                     Images = p.Images
@@ -173,7 +173,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                 await _exportRepo.ChangeStatusAsync(batchId, toSkipUpsert, ExportStatus.Insert);
 
             if (toUpsert.Any())
-                await _exporter.ImportProductsAsync(toUpsert);
+                await _exporter.ImportProductsAsync(toUpsert, token);
 
 
             // =====================================================
@@ -186,24 +186,24 @@ public class MagentoExportStepProcessor : IStepProcessor
                     Sku = p.Aic,
                     Qty = p.Availability
                 })
-                .ToList());
+                .ToList(), token);
 
             // =====================================================
             // DISABILITAZIONE PRODOTTI MANCANTI
             // =====================================================
             if (toDisable.Any())
-                await _exporter.DisableProductsAsync(toDisable);
+                await _exporter.DisableProductsAsync(toDisable, token);
 
             // =====================================================
             //  UPLOAD IMMAGINI SOLO PER UPSERT
             // =====================================================
             var all = mappedList;
-            await _exporter.UpdateImageBulkAsync(all);
+            await _exporter.UpdateImageBulkAsync(all, token);
 
             // =====================================================
             // CRON MAGENTO
             // =====================================================
-            await _exporter.RunMagentoCronAsync();
+            await _exporter.RunMagentoCronAsync(token);
 
             // =====================================================
             // FINALIZZAZIONE

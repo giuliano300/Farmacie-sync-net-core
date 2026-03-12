@@ -1,9 +1,9 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Repositories;
+﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
 using System.Collections.Concurrent;
-using static HeronIntegration.Engine.Persistence.Mongo.Repositories.StepRepository;
 
 namespace HeronIntegration.Admin.Api.Controllers;
 
@@ -14,16 +14,28 @@ public class StepsController : ControllerBase
     private readonly IStepProcessorResolver _resolver;
     private readonly IStepRepository _stepRepo;
     private readonly ICleanupService _cleanupService;
+    private readonly BatchProcessManager _processManager;
+
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _runningSteps = new();
+
+    private static readonly string[] OrderedSteps =
+    {
+        "HeronImport",
+        "Farmadati",
+        "Suppliers",
+        "Magento"
+    };
 
     public StepsController(
         IStepProcessorResolver resolver,
         IStepRepository stepRepo,
-        ICleanupService cleanupService)
+        ICleanupService cleanupService,
+        BatchProcessManager processManager)
     {
         _resolver = resolver;
         _stepRepo = stepRepo;
         _cleanupService = cleanupService;
+        _processManager = processManager;
     }
 
     [HttpGet("{batchId}")]
@@ -33,113 +45,161 @@ public class StepsController : ControllerBase
         return Ok(steps);
     }
 
+    // RUN singolo step
     [HttpPost("run")]
     public async Task<IActionResult> RunStep(RunStepRequest req)
     {
-        var step = await _stepRepo.GetStepAsync(req.BatchId, req.Step);
+        var step = await ValidateStep(req.BatchId, req.Step);
 
-        if (step == null)
-            throw new Exception($"Step non trovato {req.Step}");
+        var stepId = step.Id.ToString();
 
-        if (step.Status == Shared.Enums.StepStatus.Success)
-            throw new Exception($"Step già lavorato {req.Step}");
+        var token = _processManager.Start(req.BatchId);
 
-        await _stepRepo.SetRunningAsync(step.Id.ToString());
-
-        var processor = _resolver.Resolve(req.Step);
-
-        var token = StartStepProcess(req.BatchId);
-
-        _ = Task.Run(async () =>
+        _ = RunBackground(async () =>
         {
-            try
-            {
-                token.ThrowIfCancellationRequested();
+            await _stepRepo.SetRunningAsync(stepId);
 
-                var result = await processor.ExecuteAsync(req.BatchId);
+            var processor = _resolver.Resolve(req.Step);
 
-                if (result.Success)
-                    await _stepRepo.SetSuccessAsync(step.Id.ToString(), result.FinishedAt);
-                else
-                    await _stepRepo.SetErrorAsync(step.Id.ToString(), result!.ErrorMessage!);
-            }
-            catch (OperationCanceledException)
-            {
-                await _stepRepo.SetErrorAsync(step.Id.ToString(), "Step cancellato");
-            }
-            catch (Exception ex)
-            {
-                await _stepRepo.SetErrorAsync(step.Id.ToString(), ex.Message);
-            }
+            var result = await processor.ExecuteAsync(req.BatchId, token);
 
-        }, token);
+            await HandleResult(stepId, result);
+
+        }, stepId, token);
 
         return Ok();
     }
 
+    // RUN pipeline completa da uno step
+    [HttpPost("run-pipeline")]
+    public async Task<IActionResult> RunPipeline(RunStepRequest req)
+    {
+        var step = await ValidateStep(req.BatchId, req.Step);
+
+        var stepId = step.Id.ToString();
+
+        var token = _processManager.Start(req.BatchId);
+
+        _ = RunBackground(async () =>
+        {
+            await ExecutePipeline(req.BatchId, req.Step, token);
+
+        }, stepId, token);
+
+        return Ok();
+    }
+
+    // RETRY pipeline
     [HttpPost("retry")]
     public async Task<IActionResult> RetryStep(RetryStepRequest req)
     {
-        // FERMA tutto quello che gira
-        if (_runningSteps.TryRemove(req.BatchId, out var existing))
-            existing.Cancel();
+        StopRunningBatch(req.BatchId);
 
-        var step = await _stepRepo.GetStepAsync(req.BatchId, req.Step);
+        var token = _processManager.Start(req.BatchId);
+
+        _ = RunBackground(async () =>
+        {
+            await _cleanupService.CleanupPipeLineAsync(req.Step, req.BatchId);
+
+            await ExecutePipeline(req.BatchId, req.Step, token);
+
+        }, null, token);
+
+        return Ok();
+    }
+
+    // =========================
+    // Helpers
+    // =========================
+
+    private async Task<StepExecution> ValidateStep(string batchId, string stepName)
+    {
+        var step = await _stepRepo.GetStepAsync(batchId, stepName);
 
         if (step == null)
-            throw new Exception($"Step non trovato {req.Step}");
+            throw new Exception($"Step non trovato {stepName}");
 
-        await _stepRepo.SetRunningAsync(step.Id.ToString());
+        if (step.Status == StepStatus.Success)
+            throw new Exception($"Step già lavorato {stepName}");
 
-        // step successivi
-        var nextSteps = StepFlow.GetNextSteps(req.Step);
-        // reset solo gli step successivi
-        await _cleanupService.CleanupPipeLineAsync(req.Step, req.BatchId);
-        if (nextSteps.Count > 0)
+        return step;
+    }
+
+    private async Task HandleResult(string stepId, StepExecutionResult result)
+    {
+        if (result.Success)
+            await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+        else
+            await _stepRepo.SetErrorAsync(stepId, result.ErrorMessage!);
+    }
+
+    private void StopRunningBatch(string batchId)
+    {
+        if (_runningSteps.TryRemove(batchId, out var existing))
         {
-            await _stepRepo.ResetNextStepsAsync(req.BatchId, nextSteps);
+            existing.Cancel();
+            existing.Dispose();
         }
-
-        var processor = _resolver.Resolve(req.Step);
-
-        var token = StartStepProcess(req.BatchId);
-
-        _ = Task.Run(async () =>
+    }
+    private Task RunBackground(Func<Task> action, string? stepId, CancellationToken token)
+    {
+        return Task.Run(async () =>
         {
             try
             {
                 token.ThrowIfCancellationRequested();
 
-                var result = await processor.ExecuteAsync(step.BatchId.ToString());
-
-                if (result.Success)
-                    await _stepRepo.SetSuccessAsync(step.Id.ToString(), result.FinishedAt);
-                else
-                    await _stepRepo.SetErrorAsync(step.Id.ToString(), result!.ErrorMessage!);
+                await action();
             }
             catch (OperationCanceledException)
             {
-                await _stepRepo.SetErrorAsync(step.Id.ToString(), "Step cancellato");
+                if (stepId != null)
+                    await _stepRepo.SetErrorAsync(stepId, "Step cancellato");
             }
             catch (Exception ex)
             {
-                await _stepRepo.SetErrorAsync(step.Id.ToString(), ex.Message);
+                if (stepId != null)
+                    await _stepRepo.SetErrorAsync(stepId, ex.Message);
             }
 
         }, token);
-
-        return Ok();
     }
 
-
-    private CancellationToken StartStepProcess(string batchId)
+    private async Task ExecutePipeline(string batchId, string startStep, CancellationToken token)
     {
-        if (_runningSteps.TryRemove(batchId, out var existing))
-            existing.Cancel();
+        var startIndex = Array.IndexOf(OrderedSteps, startStep);
 
-        var cts = new CancellationTokenSource();
-        _runningSteps[batchId] = cts;
+        if (startIndex == -1)
+            throw new Exception("Step non valido");
 
-        return cts.Token;
+        for (int i = startIndex; i < OrderedSteps.Length; i++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var stepName = OrderedSteps[i];
+
+            var step = await _stepRepo.GetStepAsync(batchId, stepName);
+
+            if (step == null)
+                break;
+
+            var stepId = step.Id.ToString();
+
+            await _stepRepo.SetRunningAsync(stepId);
+
+            var processor = _resolver.Resolve(stepName);
+
+            var result = await processor.ExecuteAsync(batchId, token);
+
+            if (result.Success)
+            {
+                await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+            }
+            else
+            {
+                await _stepRepo.SetErrorAsync(stepId, result.ErrorMessage!);
+                break;
+            }
+        }
     }
 }

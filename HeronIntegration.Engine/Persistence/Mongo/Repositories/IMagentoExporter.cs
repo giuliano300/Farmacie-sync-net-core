@@ -6,30 +6,30 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 public interface IMagentoExporter
 {
     // 🔹 Import singolo prodotto
-    Task<MagentoInsertResult> ExportAsync(ResolvedProduct product);
+    Task<MagentoInsertResult> ExportAsync(ResolvedProduct product, CancellationToken token);
 
     // 🔹 Upload immagini
-    Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct product);
+    Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct product, CancellationToken token);
 
     // 🔹 Import massivo ottimizzato (NUOVO - non rompe nulla)
-    Task ImportProductsAsync(IEnumerable<ResolvedProduct> products);
+    Task ImportProductsAsync(IEnumerable<ResolvedProduct> products, CancellationToken token);
 
     // 🔹 Attributi e categorie
-    Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode);
+    Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode, CancellationToken token);
 
-    Task<Dictionary<string, int>> GetCategoryMapAsync();
+    Task<Dictionary<string, int>> GetCategoryMapAsync(CancellationToken token);
 
-    Task RunMagentoCronAsync();
+    Task RunMagentoCronAsync(CancellationToken token);
 
-    Task DisableProductsAsync(List<string> skus);
+    Task DisableProductsAsync(List<string> skus, CancellationToken token);
 
-    Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync();
+    Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(CancellationToken token);
 
-    Task UpdateStockBulkAsync(List<InventoryItem> items);
-    Task UpdateImageBulkAsync(List<ResolvedProduct> items);
+    Task UpdateStockBulkAsync(List<InventoryItem> items, CancellationToken token);
+    Task UpdateImageBulkAsync(List<ResolvedProduct> items, CancellationToken token);
 
-   Task<MagentoMetadata> GetMagentoMetadataAsync();
+   Task<MagentoMetadata> GetMagentoMetadataAsync(CancellationToken token);
 
-    int? ResolveCategoryId(Dictionary<string, int> categoryMap, string categoryName);
+    int? ResolveCategoryId(Dictionary<string, int> categoryMap, string categoryName, CancellationToken token);
 
 }

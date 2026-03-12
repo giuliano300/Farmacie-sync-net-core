@@ -1,6 +1,8 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using HeronIntegration.Engine.Persistence.Mongo;
+using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
+using HeronIntegration.Shared.Entities;
 
 namespace HeronIntegration.Engine.Workers;
 
@@ -10,17 +12,31 @@ public class BatchOrchestratorWorker : BackgroundService
     private readonly IBatchRepository _batchRepo;
     private readonly IStepRepository _stepRepo;
     private readonly IEnumerable<IStepProcessor> _processors;
+    private readonly IBatchFinalizerService _batchFinalizer;
+    private readonly IMagentoExporterFactory _magentoExporterFactory;
+    private readonly ICustomerRepository _customerRepo;
+    private readonly BatchProcessManager _processManager;
+
 
     public BatchOrchestratorWorker(
         ILogger<BatchOrchestratorWorker> logger,
         IBatchRepository batchRepo,
         IStepRepository stepRepo,
-        IEnumerable<IStepProcessor> processors)
+        IEnumerable<IStepProcessor> processors,
+        IBatchFinalizerService batchFinalizer,
+        IMagentoExporterFactory magentoExporterFactory,
+        ICustomerRepository customerRepo,
+        BatchProcessManager processManager
+    )
     {
         _logger = logger;
         _batchRepo = batchRepo;
         _stepRepo = stepRepo;
         _processors = processors;
+        _batchFinalizer = batchFinalizer;
+        _magentoExporterFactory = magentoExporterFactory;
+        _customerRepo = customerRepo;
+        _processManager = processManager;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -29,12 +45,12 @@ public class BatchOrchestratorWorker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            await RunPipeline();
+            await RunPipeline(stoppingToken);
             await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
     }
 
-    private async Task RunPipeline()
+    private async Task RunPipeline(CancellationToken token)
     {
         var runningBatches = await _batchRepo.GetRunningAsync();
 
@@ -44,7 +60,7 @@ public class BatchOrchestratorWorker : BackgroundService
 
             if (nextStep == null)
             {
-                await FinalizeBatch(batch.Id.ToString());
+                await FinalizeBatch(batch.Id.ToString(), token);
                 continue;
             }
 
@@ -58,13 +74,15 @@ public class BatchOrchestratorWorker : BackgroundService
         var StartedAt = DateTime.UtcNow;
         try
         {
+            var token = _processManager.Start(step.BatchId.ToString());
+
             var processor = _processors
                 .FirstOrDefault(p => p.Step == step.Step);
 
             if (processor == null)
                 throw new Exception($"Processor non trovato per step {step.Step}");
 
-            await processor.ExecuteAsync(step.BatchId.ToString());
+            await processor.ExecuteAsync(step.BatchId.ToString(), token);
 
             await _stepRepo.SetSuccessAsync(step.Id.ToString(), DateTime.UtcNow);
         }
@@ -79,9 +97,16 @@ public class BatchOrchestratorWorker : BackgroundService
         }
     }
 
-    private async Task FinalizeBatch(string batchId)
+    private async Task FinalizeBatch(string batchId, CancellationToken token)
     {
-        await _batchRepo.CloseAsync(batchId);
+        var batch = await _batchRepo.GetByIdAsync(batchId);
+        var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+        var exporter = _magentoExporterFactory.Create(customer!.Magento!);
+
+        await exporter.RunMagentoCronAsync(token);
+
+        await _batchFinalizer.FinalizeBatchAsync(batchId);
 
         _logger.LogInformation("Batch {BatchId} chiuso", batchId);
     }

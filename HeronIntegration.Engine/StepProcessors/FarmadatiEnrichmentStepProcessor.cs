@@ -38,7 +38,7 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
     }
 
-    public async Task<StepExecutionResult?> ExecuteAsync(string batchId)
+    public async Task<StepExecutionResult?> ExecuteAsync(string batchId, CancellationToken token)
     {
         var result = new StepExecutionResult();
         result.StartedAt = DateTime.Now;
