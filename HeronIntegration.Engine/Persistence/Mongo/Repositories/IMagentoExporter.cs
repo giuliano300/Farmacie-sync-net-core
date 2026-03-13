@@ -23,12 +23,12 @@ public interface IMagentoExporter
 
     Task DisableProductsAsync(List<string> skus, CancellationToken token);
 
-    Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(CancellationToken token);
+    Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(string batchId, CancellationToken token);
 
     Task UpdateStockBulkAsync(List<InventoryItem> items, CancellationToken token);
     Task UpdateImageBulkAsync(List<ResolvedProduct> items, CancellationToken token);
 
-   Task<MagentoMetadata> GetMagentoMetadataAsync(CancellationToken token);
+   Task<MagentoMetadata> GetMagentoMetadataAsync(string batchId, CancellationToken token);
 
     int? ResolveCategoryId(Dictionary<string, int> categoryMap, string categoryName, CancellationToken token);
 

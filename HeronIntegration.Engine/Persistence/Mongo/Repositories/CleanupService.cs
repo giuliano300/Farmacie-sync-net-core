@@ -68,6 +68,12 @@ public class CleanupService : ICleanupService
                 .Set(x => x.Status, status)
                 .Set(x => x.LastAttemptAt, null)
         );
+
+        await _context.BatchExecutions.UpdateManyAsync(
+            x => x.Id == ObjectId.Parse(batchId),
+            Builders<BatchExecution>.Update
+                .Set(x => x.totalMagentoProducts, null)
+                .Set(x => x.totalDownloadMagentoProducts, null));
     }
 
 }

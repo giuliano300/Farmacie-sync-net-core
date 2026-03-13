@@ -43,8 +43,14 @@ namespace HeronIntegration.Shared.Models
         public int InsertImages { get; set; }
         public int Success { get; set; }
         public int Errors { get; set; }
+        public int? totalMagentoProducts { get; set; } = default!;
+        public int? totalDownloadMagentoProducts { get; set; } = default!;
+
+        public double ProgressDownload =>
+        totalMagentoProducts == null ? 0 : Math.Round((double)(int)totalDownloadMagentoProducts! / (int)totalMagentoProducts! * 100, 2);
+
         public double ProgressInsert =>
-        Total == 0 ? 0 : Math.Round((double) (Insert + UpdatePrice + InsertImages + Success) / Total * 100, 2);
+        Total == 0 ? 0 : Math.Round((double)(Insert + UpdatePrice + InsertImages + Success) / Total * 100, 2);
         public double ProgressUpdatePrice =>
         Total == 0 ? 0 : Math.Round((double) (UpdatePrice + InsertImages + Success) / Total * 100, 2);
         public double ProgressInsertImages =>

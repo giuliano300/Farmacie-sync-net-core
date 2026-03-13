@@ -77,7 +77,7 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                var magentoMetadata = await exporter.GetMagentoMetadataAsync(token);
+                var magentoMetadata = await exporter.GetMagentoMetadataAsync(batchId, token);
 
                 var magentoDict = magentoMetadata.magentoProducts!
                     .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
@@ -210,8 +210,6 @@ public class MagentoController : ControllerBase
 
     private async Task UpdateStockBulkInternal(string batchId, IMagentoExporter exporter, CancellationToken token)
     {
-        token.ThrowIfCancellationRequested();
-
         var inventory = await _resolvedRepo.GetByBatchAsync(batchId);
 
         token.ThrowIfCancellationRequested();

@@ -9,4 +9,6 @@ public class BatchExecutionDto
     public DateTime StartedAt { get; set; }
     public BatchStatus Status { get; set; }
     public int SequenceNumber { get; set; }
+    public int? totalMagentoProducts { get; set; }
+    public int? totalDownloadMagentoProducts { get; set; }
 }

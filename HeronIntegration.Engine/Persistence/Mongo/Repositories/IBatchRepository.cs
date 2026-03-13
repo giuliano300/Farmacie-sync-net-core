@@ -22,6 +22,7 @@ public interface IBatchRepository
     Task SetRunningAsync(string batchId);
 
     Task<bool> CanStartNextStepAsync(string batchId);
+    Task UpdateDownloadProducts(string batchId, int totalMagentoProducts, int totalDownloadMagentoProducts);
 
     Task<(BatchExecution? batch, StepExecution? step)> GetRunningBatchWithStepAsync();
 

@@ -72,7 +72,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             // =====================================================
             // CARICAMENTO METADATI MAGENTO
             // =====================================================
-            var magentoMetatada = await _exporter.GetMagentoMetadataAsync(token);
+            var magentoMetatada = await _exporter.GetMagentoMetadataAsync(batchId, token);
 
             var magentoDict = magentoMetatada.magentoProducts!
                 .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);

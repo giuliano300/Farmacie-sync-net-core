@@ -28,4 +28,6 @@ public class BatchExecution
     public string? HeronFileName { get; set; }
 
     public string? HeronFilePath { get; set; }
+    public int? totalMagentoProducts { get; set; }
+    public int? totalDownloadMagentoProducts { get; set; }
 }

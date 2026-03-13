@@ -108,6 +108,17 @@ public class BatchRepository : IBatchRepository
         await _context.BatchExecutions.UpdateOneAsync(filter, update);
     }
 
+    public async Task UpdateDownloadProducts(string batchId, int totalMagentoProducts, int totalDownloadMagentoProducts)
+    {
+        var filter = Builders<BatchExecution>.Filter.Eq(x => x.Id, ObjectId.Parse(batchId));
+
+        var update = Builders<BatchExecution>.Update
+            .Set(x => x.totalMagentoProducts, totalMagentoProducts)
+            .Set(x => x.totalDownloadMagentoProducts, totalDownloadMagentoProducts);
+
+        await _context.BatchExecutions.UpdateOneAsync(filter, update);
+    }
+
     public async Task<List<StepExecution>> GetByBatchAsync(string batchId)
     {
         return await _context.StepExecutions
@@ -320,6 +331,8 @@ public class BatchRepository : IBatchRepository
 
             Magento = new StepMetricsMagento
             {
+                totalDownloadMagentoProducts = batch.totalDownloadMagentoProducts,
+                totalMagentoProducts = batch.totalMagentoProducts,
                 Total = exportTotal,
                 Success = exportSuccess,
                 Errors = exportErrors,
