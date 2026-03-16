@@ -40,6 +40,9 @@ public class MongoContext
     public IMongoCollection<FarmadatiCache> FarmadatiCaches =>
         _database.GetCollection<FarmadatiCache>("farmadati_cache");
 
+    public IMongoCollection<FarmadatiUpdates> FarmadatiUpdates =>
+        _database.GetCollection<FarmadatiUpdates>("farmadati_updates");
+
     public IMongoCollection<Supplier> Suppliers =>
         _database.GetCollection<Supplier>("suppliers");
 

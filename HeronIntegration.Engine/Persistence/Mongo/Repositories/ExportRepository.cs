@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
+using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using System.Text.Json;
@@ -79,8 +80,26 @@ public class ExportRepository : IExportRepository
             .Inc(x => x.AttemptCount, 1);
 
         await _context.ExportExecutions.UpdateOneAsync(
-            x => x.BatchId == ObjectId.Parse(batchId) && x.Aic == aic, 
+            x => x.BatchId == ObjectId.Parse(batchId) && x.Aic == aic,
             update);
+    }
+
+    public async Task SetStatusBulkAsync(List<InventoryItem> items, ExportStatus status)
+    {
+        var skus = items.Select(x => x.Sku).ToList();
+        var batchId = ObjectId.Parse(items[0].Id);
+
+        var filter = Builders<ExportExecution>.Filter.And(
+            Builders<ExportExecution>.Filter.Eq(x => x.BatchId, batchId),
+            Builders<ExportExecution>.Filter.In(x => x.Aic, skus)
+        );
+
+        var update = Builders<ExportExecution>.Update
+            .Set(x => x.Status, status)
+            .Set(x => x.LastAttemptAt, DateTime.UtcNow)
+            .Inc(x => x.AttemptCount, 1);
+
+        await _context.ExportExecutions.UpdateManyAsync(filter, update);
     }
 
     public async Task SetErrorAsync(string id, string aic, string error)

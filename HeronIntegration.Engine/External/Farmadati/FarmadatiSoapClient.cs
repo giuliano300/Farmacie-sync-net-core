@@ -51,6 +51,10 @@ public class FarmadatiSoapClient
                 pageSize
             );
         }
+        catch(Exception e) 
+        {
+            return null;
+        }
         finally
         {
             await client.CloseAsync();

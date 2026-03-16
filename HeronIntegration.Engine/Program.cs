@@ -132,6 +132,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IMagentoExporterFactory, MagentoExporterFactory>();
 builder.Services.AddSingleton<BatchProcessManager>();
 
+builder.Services.AddScoped<IFarmadatiUpdatesRepository, FarmadatiUpdatesRepository>();
 
 var host = builder.Build();
 host.Run();

@@ -160,6 +160,8 @@ builder.Services.AddScoped<SupplierResolutionStepProcessor>();
 builder.Services.AddScoped<MagentoExportStepProcessor>();
 builder.Services.AddSingleton<BatchProcessManager>();
 
+builder.Services.AddScoped<IFarmadatiUpdatesRepository, FarmadatiUpdatesRepository>();
+
 
 builder.Services.AddCors(options =>
 {

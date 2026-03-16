@@ -51,6 +51,28 @@ public class BatchReportController : ControllerBase
         return res;
     }
 
+    [HttpGet("today")]
+    public async Task<List<CompleteBatchesItem>> today()
+    {
+        var allPast = await _batchRepo.GetAllTodayClosed();
+
+        var res = new List<CompleteBatchesItem>();
+
+        foreach (var batch in allPast)
+        {
+            var result = new CompleteBatchesItem();
+
+            var b = await _batchRepo.BuildBatchDashboard(batch);
+            result.Batch = b;
+            var r = await _batchRepoReport.GetBatchesAsync(batch.Id.ToString());
+            result.Report = r;
+
+            res.Add(result);
+        }
+
+        return res;
+    }
+
     [HttpDelete("{id}")]
     public async Task<bool> Delete(string id)
     {

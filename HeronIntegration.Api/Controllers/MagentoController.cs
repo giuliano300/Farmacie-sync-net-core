@@ -88,6 +88,7 @@ public class MagentoController : ControllerBase
 
                 var mappedList = resolvedList.Select(p => new ResolvedProduct
                 {
+                    BatchId = p.BatchId,
                     Aic = p.Aic,
                     Name = p.Name,
                     Price = p.Price,
@@ -145,9 +146,9 @@ public class MagentoController : ControllerBase
 
                 await UpdateStockBulkInternal(batchId, exporter, token);
 
-                token.ThrowIfCancellationRequested();
+                //token.ThrowIfCancellationRequested();
 
-                await exporter.UpdateImageBulkAsync(mappedList, token);
+                //await exporter.UpdateImageBulkAsync(mappedList, token);
 
                 token.ThrowIfCancellationRequested();
 

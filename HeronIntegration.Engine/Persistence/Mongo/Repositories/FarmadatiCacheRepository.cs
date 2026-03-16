@@ -32,6 +32,20 @@ public class FarmadatiCacheRepository : IFarmadatiCacheRepository
         await _context.FarmadatiCaches.InsertManyAsync(cache);
     }
 
+
+    public async Task UpdateManyAsync(IEnumerable<FarmadatiCache> updates)
+    {
+        var ids = updates.Select(x => x.Id).ToList();
+
+        var filter = Builders<FarmadatiCache>.Filter.In(x => x.Id, ids);
+        
+        var update = Builders<FarmadatiCache>.Update
+        .Set(x => x.CachedAt, DateTime.UtcNow);
+
+        await _context.FarmadatiCaches.UpdateManyAsync(filter, update);
+    }
+
+
     public async Task<List<FarmadatiCache>> GetByAicsAsync(IEnumerable<string> aics)
     {
         var filter = Builders<FarmadatiCache>.Filter
@@ -39,6 +53,12 @@ public class FarmadatiCacheRepository : IFarmadatiCacheRepository
 
         return await _context.FarmadatiCaches
             .Find(filter)
+            .ToListAsync();
+    }
+    public async Task<List<FarmadatiCache>> GetAll()
+    {
+        return await _context.FarmadatiCaches
+            .Find(_ => true)
             .ToListAsync();
     }
 }

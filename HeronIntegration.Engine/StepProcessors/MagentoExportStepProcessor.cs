@@ -86,6 +86,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             {
                 return new ResolvedProduct
                 {
+                    BatchId = p.BatchId,
                     Aic = p.Aic,
                     Name = p.Name,
                     Price = p.Price,
@@ -175,6 +176,11 @@ public class MagentoExportStepProcessor : IStepProcessor
             if (toUpsert.Any())
                 await _exporter.ImportProductsAsync(toUpsert, token);
 
+            // =====================================================
+            // DISABILITAZIONE PRODOTTI MANCANTI
+            // =====================================================
+            if (toDisable.Any())
+                await _exporter.DisableProductsAsync(toDisable, token);
 
             // =====================================================
             //  UPDATE STOCK
@@ -189,16 +195,10 @@ public class MagentoExportStepProcessor : IStepProcessor
                 .ToList(), token);
 
             // =====================================================
-            // DISABILITAZIONE PRODOTTI MANCANTI
+            //  UPLOAD IMMAGINI SOLO PER UPSERT(AGGIUNTO NELL'INSERIMENTO)
             // =====================================================
-            if (toDisable.Any())
-                await _exporter.DisableProductsAsync(toDisable, token);
-
-            // =====================================================
-            //  UPLOAD IMMAGINI SOLO PER UPSERT
-            // =====================================================
-            var all = mappedList;
-            await _exporter.UpdateImageBulkAsync(all, token);
+            //var all = mappedList;
+            //await _exporter.UpdateImageBulkAsync(all, token);
 
             // =====================================================
             // CRON MAGENTO

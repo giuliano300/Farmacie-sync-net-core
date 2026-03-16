@@ -18,6 +18,7 @@ public class Customer
     public string HeronFolder { get; set; } = default!;
 
     public bool Active { get; set; } = true;
+    public bool Msi { get; set; } = true;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     

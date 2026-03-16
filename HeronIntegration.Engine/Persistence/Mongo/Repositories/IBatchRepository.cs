@@ -32,6 +32,8 @@ public interface IBatchRepository
     Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId);
     Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId);
 
+    Task<List<BatchExecution>> GetAllTodayClosed();
+
     Task<BatchDashboardItem> BuildBatchDashboard(BatchExecution batch);
 
     Task DeleteAsync(string id);

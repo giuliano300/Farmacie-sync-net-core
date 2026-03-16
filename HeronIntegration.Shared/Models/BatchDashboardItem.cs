@@ -40,7 +40,6 @@ namespace HeronIntegration.Shared.Models
         public int Pending { get; set; }
         public int Insert { get; set; }
         public int UpdatePrice { get; set; }
-        public int InsertImages { get; set; }
         public int Success { get; set; }
         public int Errors { get; set; }
         public int? totalMagentoProducts { get; set; } = default!;
@@ -50,11 +49,9 @@ namespace HeronIntegration.Shared.Models
         totalMagentoProducts == null ? 0 : Math.Round((double)(int)totalDownloadMagentoProducts! / (int)totalMagentoProducts! * 100, 2);
 
         public double ProgressInsert =>
-        Total == 0 ? 0 : Math.Round((double)(Insert + UpdatePrice + InsertImages + Success) / Total * 100, 2);
+        Total == 0 ? 0 : Math.Round((double)(Insert + UpdatePrice + Success) / Total * 100, 2);
         public double ProgressUpdatePrice =>
-        Total == 0 ? 0 : Math.Round((double) (UpdatePrice + InsertImages + Success) / Total * 100, 2);
-        public double ProgressInsertImages =>
-        Total == 0 ? 0 : Math.Round((double)(InsertImages + Success) / Total * 100, 2);
+        Total == 0 ? 0 : Math.Round((double) (UpdatePrice + Success) / Total * 100, 2);
         public double Progress =>
         Total == 0 ? 0 : Math.Round((double)Success / Total * 100, 2);
     }

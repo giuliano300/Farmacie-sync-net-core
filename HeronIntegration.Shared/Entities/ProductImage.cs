@@ -8,5 +8,5 @@ public class ProductImage
     public ObjectId? GridFsId { get; set; }      
     public string? Type { get; set; }
     public string? AltText { get; set; }
-    public string? MimeType { get; set; }     // image/jpeg, image/png
+    public string? MimeType { get; set; } 
 }

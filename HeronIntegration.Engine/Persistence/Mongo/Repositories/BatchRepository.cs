@@ -187,6 +187,17 @@ public class BatchRepository : IBatchRepository
             .ToListAsync();
     }
 
+    public async Task<List<BatchExecution>> GetAllTodayClosed()
+    {
+        var todayStart = DateTime.UtcNow.Date;
+        var tomorrow = todayStart.AddDays(1);
+
+        return await _context.BatchExecutions
+            .Find(x => x.StartedAt >= todayStart && x.StartedAt < tomorrow && x.Status == BatchStatus.Closed)
+            .SortByDescending(x => x.StartedAt)
+            .ToListAsync();
+    }
+
     public async Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId)
     {
         var todayStart = DateTime.UtcNow.Date;
@@ -267,7 +278,6 @@ public class BatchRepository : IBatchRepository
         int exportSuccess = 0;
         int exportInsert = 0;
         int exportUpdatePrice = 0;
-        int exportInsertImage = 0;
         int exportError = 0;
 
         foreach (var e in export)
@@ -290,9 +300,9 @@ public class BatchRepository : IBatchRepository
                     exportUpdatePrice++;
                     break;
 
-                case ExportStatus.InsertImages:
-                    exportInsertImage++;
-                    break;
+                //case ExportStatus.InsertImages:
+                //    exportInsertImage++;
+                //    break;
 
                 case ExportStatus.Error:
                     exportError++;
@@ -336,7 +346,6 @@ public class BatchRepository : IBatchRepository
                 Total = exportTotal,
                 Success = exportSuccess,
                 Errors = exportErrors,
-                InsertImages = exportInsertImage,
                 Insert = exportInsert,
                 UpdatePrice = exportUpdatePrice,
                 Pending = exportPending
