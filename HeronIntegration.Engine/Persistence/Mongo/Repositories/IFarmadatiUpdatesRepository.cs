@@ -9,7 +9,7 @@ public interface IFarmadatiUpdatesRepository
     Task<List<FarmadatiUpdates>?> FindAsync();
     Task<FarmadatiUpdates?> GetByIdAsync(string id);
 
-    Task CreateAsync(FarmadatiUpdates updates);
+    Task CreateAsync(FarmadatiUpdates updates, CancellationToken token);
 
     Task UpdateAsync(string id, FarmadatiUpdates updates);
 

@@ -1,34 +1,48 @@
-﻿using System.Collections.Concurrent;
+﻿using HeronIntegration.Shared.Enums;
+using System.Collections.Concurrent;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
 {
     public class BatchProcessManager
     {
-        private readonly ConcurrentDictionary<string, CancellationTokenSource> _running =
-            new();
+        private readonly ConcurrentDictionary<string, CancellationTokenSource> _running = new();
 
-        public CancellationToken Start(string batchId)
+        private static string BuildKey(ProcessType type, string id)
+            => $"{type}:{id}";
+
+        public CancellationToken Start(ProcessType type, string id)
         {
-            Stop(batchId);
+            var key = BuildKey(type, id);
+            var newCts = new CancellationTokenSource();
 
-            var cts = new CancellationTokenSource();
-            _running[batchId] = cts;
+            _running.AddOrUpdate(
+                key,
+                newCts,
+                (_, existing) =>
+                {
+                    existing.Cancel();
+                    existing.Dispose();
+                    return newCts;
+                });
 
-            return cts.Token;
+            return newCts.Token;
         }
 
-        public void Stop(string batchId)
+        public void Stop(ProcessType type, string id)
         {
-            if (_running.TryRemove(batchId, out var cts))
+            var key = BuildKey(type, id);
+
+            if (_running.TryRemove(key, out var cts))
             {
                 cts.Cancel();
                 cts.Dispose();
             }
         }
 
-        public bool IsRunning(string batchId)
+        public bool IsRunning(ProcessType type, string id)
         {
-            return _running.ContainsKey(batchId);
+            return _running.TryGetValue(BuildKey(type, id), out var cts)
+                   && !cts.IsCancellationRequested;
         }
     }
 }

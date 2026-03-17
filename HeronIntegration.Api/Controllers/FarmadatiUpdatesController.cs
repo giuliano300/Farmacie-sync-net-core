@@ -11,10 +11,12 @@ using MongoDB.Bson;
 public class FarmadatiUpdatesController : ControllerBase
 {
     private readonly IFarmadatiUpdatesRepository _repo;
+    private readonly BatchProcessManager _processManager;
 
-    public FarmadatiUpdatesController(IFarmadatiUpdatesRepository repo)
+    public FarmadatiUpdatesController(IFarmadatiUpdatesRepository repo, BatchProcessManager processManager)
     {
         _repo = repo;
+        _processManager = processManager;
     }
 
     [HttpGet]
@@ -41,7 +43,12 @@ public class FarmadatiUpdatesController : ControllerBase
     {
         update.Id = ObjectId.GenerateNewId().ToString();
         update.StartedAt = DateTime.UtcNow;
-        await _repo.CreateAsync(update);
+
+        var token = _processManager.Start(ProcessType.Farmadati, update.Id);
+
+        token.ThrowIfCancellationRequested();
+
+        await _repo.CreateAsync(update, token);
 
         return Ok(update);
     }

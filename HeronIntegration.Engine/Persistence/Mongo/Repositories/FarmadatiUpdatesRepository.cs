@@ -3,6 +3,7 @@ using HeronIntegration.Engine.External.Farmadati.Generated;
 using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using System.Collections.Concurrent;
@@ -12,12 +13,14 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
     private readonly MongoContext _context;
     private readonly IProductEnrichmentService _productService;
     private readonly IFarmadatiCacheRepository _farmadatiCacheRepo;
+    private readonly BatchProcessManager _processManager;
 
-    public FarmadatiUpdatesRepository(MongoContext context, IProductEnrichmentService productService, IFarmadatiCacheRepository farmadatiCacheRepo)
+    public FarmadatiUpdatesRepository(MongoContext context, IProductEnrichmentService productService, IFarmadatiCacheRepository farmadatiCacheRepo, BatchProcessManager processManager)
     {
         _context = context;
-        _productService= productService;
+        _productService = productService;
         _farmadatiCacheRepo = farmadatiCacheRepo;
+        _processManager = processManager;
     }
 
     public async Task<List<FarmadatiUpdates>?> FindAsync()
@@ -33,16 +36,34 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
             .Find(x => x.Id== id)
             .FirstOrDefaultAsync();
     }
-    public async Task CreateAsync(FarmadatiUpdates updates)
+    public async Task CreateAsync(FarmadatiUpdates updates, CancellationToken token)
     {
         await _context.FarmadatiUpdates.InsertOneAsync(updates);
 
         _ = Task.Run(async () =>
         {
-            await ProcessFarmadatiCache(updates);
+            try
+            {
+                await ProcessFarmadatiCache(updates, token);
+            }
+            catch (OperationCanceledException)
+            {
+                // STOP voluto → non è errore
+                updates.EndedAt = DateTime.UtcNow;
+                await UpdateAsync(updates.Id!, updates);
+            }
+            catch (Exception ex)
+            {
+                // errore reale → qui logghi
+                updates.EndedAt = DateTime.UtcNow;
+                await UpdateAsync(updates.Id!, updates);
+
+                // TODO: log4net
+                Console.WriteLine(ex);
+            }
         });
     }
-    private async Task ProcessFarmadatiCache(FarmadatiUpdates updates)
+    private async Task ProcessFarmadatiCache(FarmadatiUpdates updates, CancellationToken token)
     {
         var farmadatiCache = await _farmadatiCacheRepo.GetAll();
 
@@ -51,18 +72,22 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
         int worked = 0;
 
         updates.productNumber = farmadatiCache.Count;
-        await UpdateAsync(updates.Id, updates);
+        await UpdateAsync(updates.Id!, updates);
 
         foreach (var chunk in chunks)
         {
+            token.ThrowIfCancellationRequested();
+
             var updatedCaches = new ConcurrentBag<FarmadatiCache>();
 
             await Parallel.ForEachAsync(chunk, new ParallelOptions
             {
+                CancellationToken = token,
                 MaxDegreeOfParallelism = 10
             },
             async (f, ct) =>
             {
+                ct.ThrowIfCancellationRequested();
                 var enriched = await _productService.EnrichAsync(
                     f.Aic,
                     ObjectId.GenerateNewId().ToString(),
@@ -84,11 +109,11 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
             worked += updatedCaches.Count;
 
             updates.productWorked = worked;
-            await UpdateAsync(updates.Id, updates);
+            await UpdateAsync(updates.Id!, updates);
         }
 
         updates.EndedAt = DateTime.UtcNow;
-        await UpdateAsync(updates.Id, updates);
+        await UpdateAsync(updates.Id!, updates);
     }
 
     public async Task UpdateAsync(string id, FarmadatiUpdates updates)
@@ -100,6 +125,8 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
 
     public async Task DeleteAsync(string id)
     {
+        _processManager.Stop(ProcessType.Farmadati, id);
+
         await _context.FarmadatiUpdates.DeleteOneAsync(
             x => x.Id == id);
     }

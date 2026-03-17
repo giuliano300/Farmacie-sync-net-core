@@ -53,7 +53,7 @@ public class StepsController : ControllerBase
 
         var stepId = step.Id.ToString();
 
-        var token = _processManager.Start(req.BatchId);
+        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
 
         _ = RunBackground(async () =>
         {
@@ -78,7 +78,7 @@ public class StepsController : ControllerBase
 
         var stepId = step.Id.ToString();
 
-        var token = _processManager.Start(req.BatchId);
+        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
 
         _ = RunBackground(async () =>
         {
@@ -95,7 +95,7 @@ public class StepsController : ControllerBase
     {
         StopRunningBatch(req.BatchId);
 
-        var token = _processManager.Start(req.BatchId);
+        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
 
         _ = RunBackground(async () =>
         {

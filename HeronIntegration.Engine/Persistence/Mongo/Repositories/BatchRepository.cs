@@ -13,7 +13,6 @@ public class BatchRepository : IBatchRepository
     private readonly IStepRepository _stepRepo;
     private readonly ICustomerRepository _customerRepo;
     private readonly IRawProductRepository _rawRepo;
-    private readonly IHostEnvironment _env;
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
     private readonly IExportRepository _exportRepo;
@@ -22,7 +21,6 @@ public class BatchRepository : IBatchRepository
     public BatchRepository(
         MongoContext context,
         IStepRepository stepRepo,
-        IHostEnvironment env,
         ICustomerRepository customerRepo,
         IRawProductRepository rawRepo,
         IEnrichedProductRepository enrichedRepo,
@@ -33,7 +31,6 @@ public class BatchRepository : IBatchRepository
     {
         _context = context;
         _stepRepo = stepRepo;
-        _env = env;
         _customerRepo = customerRepo;
         _rawRepo = rawRepo;
         _enrichedRepo = enrichedRepo;
@@ -50,6 +47,39 @@ public class BatchRepository : IBatchRepository
             .Limit(limit)
             .ToListAsync();
     }
+
+    public async Task<List<BatchExecution>> GetOpenBatchesAsync(DateTime? y)
+    {
+        var statusFilter = Builders<BatchExecution>.Filter
+            .Ne(x => x.Status, BatchStatus.Closed);
+
+        FilterDefinition<BatchExecution> filter;
+
+        if (y == null)
+        {
+            // 👉 tutti i batch aperti
+            filter = statusFilter;
+        }
+        else
+        {
+            var baseDate = y.Value.Date;
+
+            var yesterday = baseDate.AddDays(-1);
+            var today = yesterday.AddDays(1);
+
+            var dateFilter = Builders<BatchExecution>.Filter.And(
+                Builders<BatchExecution>.Filter.Gte(x => x.StartedAt, yesterday),
+                Builders<BatchExecution>.Filter.Lt(x => x.StartedAt, today)
+            );
+
+            filter = Builders<BatchExecution>.Filter.And(statusFilter, dateFilter);
+        }
+
+        return await _context.BatchExecutions
+            .Find(filter)
+            .ToListAsync();
+    }
+
     public async Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId)
     {
         var todayStart = DateTime.UtcNow.Date;
@@ -216,7 +246,7 @@ public class BatchRepository : IBatchRepository
     {
         var objectId = ObjectId.Parse(id);
 
-        _processManager.Stop(id);
+        _processManager.Stop(ProcessType.Batch, id);
 
         // cancella i prodotti raw collegati al batch
         await _context.RawProducts.DeleteManyAsync(x => x.BatchId == objectId);

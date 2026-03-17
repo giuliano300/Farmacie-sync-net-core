@@ -45,8 +45,25 @@ namespace HeronIntegration.Shared.Models
         public int? totalMagentoProducts { get; set; } = default!;
         public int? totalDownloadMagentoProducts { get; set; } = default!;
 
-        public double ProgressDownload =>
-        totalMagentoProducts == null ? 0 : Math.Round((double)(int)totalDownloadMagentoProducts! / (int)totalMagentoProducts! * 100, 2);
+        public double ProgressDownload
+        {
+            get
+            {
+                if (!totalMagentoProducts.HasValue || !totalDownloadMagentoProducts.HasValue)
+                    return 0;
+
+                var total = totalMagentoProducts.Value;
+                var downloaded = totalDownloadMagentoProducts.Value;
+
+                if (total == 0 && downloaded == 0)
+                    return 100;
+
+                if (total == 0)
+                    return 0;
+
+                return Math.Round((double)downloaded / total * 100, 2);
+            }
+        }
 
         public double ProgressInsert =>
         Total == 0 ? 0 : Math.Round((double)(Insert + UpdatePrice + Success) / Total * 100, 2);
@@ -55,4 +72,6 @@ namespace HeronIntegration.Shared.Models
         public double Progress =>
         Total == 0 ? 0 : Math.Round((double)Success / Total * 100, 2);
     }
+
+
 }

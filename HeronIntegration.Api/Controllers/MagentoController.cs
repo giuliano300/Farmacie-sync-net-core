@@ -61,7 +61,7 @@ public class MagentoController : ControllerBase
 
         await _stepRepo.SetRunningAsync(step.Id.ToString());
 
-        var token = _processManager.Start(batchId);
+        var token = _processManager.Start(ProcessType.Batch, batchId);
 
         _ = Task.Run(async () =>
         {
@@ -179,7 +179,7 @@ public class MagentoController : ControllerBase
     {
         await _cleanupService.updateExportExecution(batchId, ExportStatus.Insert);
 
-        var token = _processManager.Start(batchId);
+        var token = _processManager.Start(ProcessType.Batch,batchId);
 
         _ = Task.Run(async () =>
         {
@@ -238,7 +238,7 @@ public class MagentoController : ControllerBase
     {
         await _cleanupService.updateExportExecution(batchId, ExportStatus.UpdatePrice);
 
-        var token = _processManager.Start(batchId);
+        var token = _processManager.Start(ProcessType.Batch,batchId);
 
         _ = Task.Run(async () =>
         {
@@ -283,7 +283,7 @@ public class MagentoController : ControllerBase
     [HttpGet("runMagentoCronAsync")]
     public async Task<IActionResult> RunMagentoCronAsync(string batchId)
     {
-        var token = _processManager.Start(batchId);
+        var token = _processManager.Start(ProcessType.Batch,batchId);
 
         _ = Task.Run(async () =>
         {
@@ -308,7 +308,7 @@ public class MagentoController : ControllerBase
     [HttpGet("finalizeBatchAsync")]
     public async Task<IActionResult> FinalizeBatchAsync(string batchId)
     {
-        var token = _processManager.Start(batchId);
+        var token = _processManager.Start(ProcessType.Batch,batchId);
 
         _ = Task.Run(async () =>
         {

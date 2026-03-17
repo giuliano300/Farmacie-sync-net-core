@@ -38,4 +38,6 @@ public interface IBatchRepository
 
     Task DeleteAsync(string id);
 
+    Task<List<BatchExecution>> GetOpenBatchesAsync(DateTime? yesterday = null);
+
 }

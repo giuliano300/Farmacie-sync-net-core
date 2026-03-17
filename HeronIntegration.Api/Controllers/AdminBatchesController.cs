@@ -16,6 +16,7 @@ public class BatchController : ControllerBase
     private readonly IStepRepository _stepRepo;
     private readonly ICustomerRepository _customerRepo;
     private readonly IHostEnvironment _env;
+    private readonly IBatchFinalizerService _batchFinalizer;
     private readonly HeronImportStepProcessor _heronProcessor;
     private readonly FarmadatiEnrichmentStepProcessor _farmadatiProcessor;
     private readonly SupplierResolutionStepProcessor _supplierProcessor;
@@ -31,8 +32,8 @@ public class BatchController : ControllerBase
         FarmadatiEnrichmentStepProcessor farmadatiProcessor,
         SupplierResolutionStepProcessor supplierProcessor,
         MagentoExportStepProcessor magentoProcessor,
-        BatchProcessManager processManager
-        )
+        BatchProcessManager processManager,
+        IBatchFinalizerService batchFinalizer)
     {
         _batchRepo = batchRepo;
         _stepRepo = stepRepo;
@@ -43,6 +44,7 @@ public class BatchController : ControllerBase
         _supplierProcessor = supplierProcessor;
         _magentoProcessor = magentoProcessor;
         _processManager = processManager;
+        _batchFinalizer = batchFinalizer;
     }
 
     [HttpGet]
@@ -108,7 +110,7 @@ public class BatchController : ControllerBase
     {
         try
         {
-            var token = _processManager.Start(batchId);
+            var token = _processManager.Start(ProcessType.Batch,batchId);
 
             await _stepRepo.ResetStepsAsync(batchId);
             var step = await _stepRepo.GetByIdAsync(stepId);
@@ -143,7 +145,7 @@ public class BatchController : ControllerBase
     {
         try
         {
-            var token = _processManager.Start(batchId);
+            var token = _processManager.Start(ProcessType.Batch, batchId);
 
             await _batchRepo.SetRunningAsync(batchId);
             await _heronProcessor.ExecuteAsync(batchId, token);
@@ -195,6 +197,34 @@ public class BatchController : ControllerBase
                 CurrentStep = e.Message.ToString(),
                 StepStatus = null
             };
+        }
+
+    }
+
+    [HttpGet("finalize-batch")]
+    public async Task<bool> Finalize(DateTime? y = null)
+    {
+        try
+        {
+            var runningBatch = await _batchRepo.GetOpenBatchesAsync(y);
+
+            foreach (var batch in runningBatch)
+            {
+                try
+                {
+                    await _batchFinalizer.FinalizeBatchAsync(batch.Id.ToString());
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Errore batch {batch.Id}: {ex.Message}");
+                }
+            }
+
+            return true;
+        }
+        catch (Exception e)
+        {
+            return false;
         }
 
     }

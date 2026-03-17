@@ -55,7 +55,7 @@ public class MagentoExporter : IMagentoExporter
 
         try
         {
-            await UpsertProductAsync(p, token);
+            await UpsertProductAsync(p, p.BatchId.ToString(), token);
             result.Success = true;
         }
         catch (Exception ex)
@@ -76,7 +76,11 @@ public class MagentoExporter : IMagentoExporter
         {
             var l = products.ToList();
             var batchId = l[0].BatchId.ToString();
-            var c = await _customerRepo.GetByIdAsync(batchId);
+            var b = await _batchRepo.GetByIdAsync(batchId);
+            if (b == null)
+                return;
+
+            var c = await _customerRepo.GetByIdAsync(b.CustomerId);
             if (c == null)
                 return;
 
@@ -86,12 +90,12 @@ public class MagentoExporter : IMagentoExporter
                  products,
                  async (p, ct) =>
                  {
-                     await UpsertProductAsync(p, ct);
+                     await UpsertProductAsync(p, batchId, ct);
                  },
                  token);
             else
                 //INVIO BULK
-                await UpsertProductBulkAsync(l, token);
+                await UpsertProductBulkAsync(l, batchId, token);
         }
         catch (OperationCanceledException)
         {
@@ -103,7 +107,7 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🔥 UPSERT PRODOTTO  
     // =====================================================
-    private async Task UpsertProductAsync(ResolvedProduct p, CancellationToken token)
+    private async Task UpsertProductAsync(ResolvedProduct p, string batchId, CancellationToken token)
     {
         var payload = new
         {
@@ -124,27 +128,50 @@ public class MagentoExporter : IMagentoExporter
         await SendAsync(request, token);
 
         await UploadImagesAsync(p, token);
+
+        await _exportRepo.SetStatusAsync(batchId, p.Aic, ExportStatus.Insert);
     }
-    public async Task UpsertProductBulkAsync(List<ResolvedProduct> products, CancellationToken token)
+    public async Task UpsertProductBulkAsync(List<ResolvedProduct> products, string batchId, CancellationToken token)
     {
         const int batchSize = 500;
 
-        foreach (var batch in products.Chunk(batchSize))
+        try
         {
-            var payload = batch.Select(p => BuildMagentoProductWithoutImages(p));
+            foreach (var batch in products.Chunk(batchSize))
+            {
+                var payload = batch.Select(p => new
+                {
+                    product = BuildMagentoProductWithoutImages(p)
+                });
 
-            var req = new HttpRequestMessage(
-                HttpMethod.Post,
-                $"{BaseUrl}/rest/async/bulk/V1/products"
-            );
+                var j = JsonSerializer.Serialize(payload);
 
-            req.Content = new StringContent(
-                JsonSerializer.Serialize(payload),
-                Encoding.UTF8,
-                "application/json"
-            );
+                var req = new HttpRequestMessage(
+                    HttpMethod.Post,
+                    $"{BaseUrl}/rest/async/bulk/V1/products"
+                );
 
-            await SendAsync(req, token);
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(payload),
+                    Encoding.UTF8,
+                    "application/json"
+                );
+
+                await SendAsync(req, token);
+
+                var list = batch.Select(p => new InventoryItem
+                {
+                    Id = batchId,
+                    Sku = p.Aic,
+                    Qty = p.Availability
+                }).ToList();
+
+                await _exportRepo.SetStatusBulkAsync(list, ExportStatus.Insert);
+
+            }
+        }
+        catch(Exception e) 
+        { 
         }
     }
 
@@ -721,6 +748,7 @@ public class MagentoExporter : IMagentoExporter
         const int pageSize = 300;
         int total;
         var batch = await _batchRepo.GetByIdAsync(batchId);
+        await _batchRepo.UpdateDownloadProducts(batchId, 0, 0);
 
         try
         {
@@ -745,6 +773,8 @@ public class MagentoExporter : IMagentoExporter
                 var pageResult = JsonSerializer.Deserialize<ProductSearchResult>(json,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
+                if (pageResult.Items == null)
+                    break;
                 foreach (var item in pageResult.Items)
                 {
                     var manufacturer = item.CustomAttributes?

@@ -3,6 +3,7 @@ using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
 
 namespace HeronIntegration.Engine.Workers;
 
@@ -74,7 +75,7 @@ public class BatchOrchestratorWorker : BackgroundService
         var StartedAt = DateTime.UtcNow;
         try
         {
-            var token = _processManager.Start(step.BatchId.ToString());
+            var token = _processManager.Start(ProcessType.Batch, step.BatchId.ToString());
 
             var processor = _processors
                 .FirstOrDefault(p => p.Step == step.Step);
