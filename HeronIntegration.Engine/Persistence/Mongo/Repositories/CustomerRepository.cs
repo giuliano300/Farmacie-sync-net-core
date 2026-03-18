@@ -31,6 +31,13 @@ public class CustomerRepository : ICustomerRepository
     public async Task<Customer?> GetByIdAsync(string id)
         => await _context.Customers.Find(x => x.Id == id).FirstOrDefaultAsync();
 
+    public async Task<List<Customer>> GetByIdsAsync(IEnumerable<string> ids)
+    {
+        return await _context.Customers
+            .Find(x => ids.Contains(x.Id))
+            .ToListAsync();
+    }
+
     public async Task UpdateAsync(Customer customer)
         => await _context.Customers.ReplaceOneAsync(x => x.Id == customer.Id, customer);
 

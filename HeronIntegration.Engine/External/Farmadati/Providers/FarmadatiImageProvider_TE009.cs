@@ -37,6 +37,8 @@ public class FarmadatiImageProvider_TE009 : IProductImageProvider
                 page: 1,
                 pageSize: 10
             );
+            if (result == null)
+                return Array.Empty<ProductImage>();
 
             if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
                 return Array.Empty<ProductImage>();

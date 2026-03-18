@@ -1,0 +1,14 @@
+{
+  "Id": {
+    "Timestamp": 1773820642,
+    "CreationTime": "2026-03-18T07:57:22Z"
+  },
+  "BatchId": "69ba5ab7e429bbd10850f942",
+  "FinishedAt": "2026-03-18T07:57:22.5248919Z",
+  "TotalProducts": 0,
+  "Insert": 0,
+  "UpdatePrice": 0,
+  "InsertImages": 0,
+  "Complete": 0,
+  "Errors": 0
+}

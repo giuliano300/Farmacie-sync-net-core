@@ -51,6 +51,9 @@ public class FarmadatiProductBaseInfoProvider_TE003 : IProductBaseInfoProvider
             pageSize: 1
         );
 
+        if (result == null)
+            return null;
+
         if (result.NumRecords == 0)
             return null;
 

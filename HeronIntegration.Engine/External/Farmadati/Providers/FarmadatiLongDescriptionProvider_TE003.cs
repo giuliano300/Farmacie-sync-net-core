@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.External.Farmadati;
 using HeronIntegration.Engine.External.Farmadati.Generated;
 using HeronIntegration.Engine.External.Farmadati.Interfaces;
+using HeronIntegration.Shared.Entities;
 using System.Text;
 using System.Xml.Linq;
 
@@ -49,6 +50,10 @@ public class FarmadatiLongDescriptionProvider_TE003 : IProductLongDescriptionPro
             page: 1,
             pageSize: 1
         );
+
+        if (result == null)
+            return null;
+
 
         if (result.NumRecords == 0)
             return null;

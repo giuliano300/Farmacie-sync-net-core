@@ -33,6 +33,9 @@ public class FarmadatiLongDescriptionProvider_TR039 : IProductLongDescriptionPro
             pageSize: 1
         );
 
+        if (result == null)
+            return null;
+
         if (string.IsNullOrWhiteSpace(result.OutputValue) || result.OutputValue == "EMPTY")
             return null;
 

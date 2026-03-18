@@ -27,7 +27,7 @@ public class SupplierStockRepository : ISupplierStockRepository
     string supplierCode,
     IEnumerable<SupplierStock> items)
     {
-        await _context.SupplierStocks.DeleteManyAsync(x => x.SupplierCode == supplierCode);
+        await _context.SupplierStocks.DeleteManyAsync(x => x.SupplierCode == supplierCode.ToUpper());
 
         await _context.SupplierStocks.InsertManyAsync(items);
     }

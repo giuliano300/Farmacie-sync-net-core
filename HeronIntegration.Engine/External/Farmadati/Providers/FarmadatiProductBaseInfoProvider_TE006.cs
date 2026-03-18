@@ -28,6 +28,9 @@ public class FarmadatiProductBaseInfoProvider_TE006 : IProductBaseInfoProvider
             pageSize: 1
         );
 
+        if (result == null)
+            return null;
+
         if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
             return null;
 

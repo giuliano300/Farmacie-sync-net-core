@@ -55,15 +55,24 @@ public class SupplierStockProcessor : ISupplierStockProcessor
 
             ftp.Connect();
 
-            var fileName = Path.GetFileName(supplier.RemoteFile);
+            var files = ftp.GetListing();
 
-            var localPath = Path.Combine(folder, fileName);
+            // 👉 prendi il più recente
+            var latestFile = files
+                .Where(x => x.Type == FtpObjectType.File)
+                .OrderByDescending(x => x.Modified)
+                .FirstOrDefault();
 
-            ftp.DownloadFile(localPath, supplier.RemoteFile);
+            if (latestFile == null)
+                return null;
+
+            var localPath = Path.Combine(folder, latestFile.Name);
+
+            ftp.DownloadFile(localPath, latestFile.FullName);
 
             ftp.Disconnect();
 
-            return fileName;
+            return latestFile.FullName;
 
         }
         catch(Exception e)

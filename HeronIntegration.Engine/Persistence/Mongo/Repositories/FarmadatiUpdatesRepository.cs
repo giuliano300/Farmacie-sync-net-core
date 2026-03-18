@@ -4,6 +4,7 @@ using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
+using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using System.Collections.Concurrent;
@@ -14,22 +15,66 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
     private readonly IProductEnrichmentService _productService;
     private readonly IFarmadatiCacheRepository _farmadatiCacheRepo;
     private readonly BatchProcessManager _processManager;
+    private readonly IHeronXmlParser _parser;
+    private readonly ICustomerRepository _customerRepository;
+    private readonly IHostEnvironment _env;
+    private readonly IProductEnrichmentService _enrichmentService;
+    private readonly IManagementCacheRepository _managementCacheRepo;
 
-    public FarmadatiUpdatesRepository(MongoContext context, IProductEnrichmentService productService, IFarmadatiCacheRepository farmadatiCacheRepo, BatchProcessManager processManager)
+
+    public FarmadatiUpdatesRepository(
+        MongoContext context, 
+        IProductEnrichmentService productService, 
+        IFarmadatiCacheRepository farmadatiCacheRepo, 
+        BatchProcessManager processManager, 
+        IHeronXmlParser parser, 
+        ICustomerRepository customerRepository, 
+        IHostEnvironment env, 
+        IProductEnrichmentService enrichmentService,
+        IManagementCacheRepository managementCacheRepo
+        )
     {
         _context = context;
         _productService = productService;
         _farmadatiCacheRepo = farmadatiCacheRepo;
         _processManager = processManager;
+        _parser = parser;
+        _customerRepository = customerRepository;
+        _env = env;
+        _enrichmentService = enrichmentService;
+        _managementCacheRepo = managementCacheRepo;
     }
 
-    public async Task<List<FarmadatiUpdates>?> FindAsync()
+    public async Task<List<FarmadatiUpdatesWithCustomer>> FindAsync()
     {
-        return await _context.FarmadatiUpdates
-           .Find(_ => true)
-           .ToListAsync();
-    }
+        var updates = await _context.FarmadatiUpdates
+            .Find(_ => true)
+            .ToListAsync();
 
+        if (!updates.Any())
+            return new List<FarmadatiUpdatesWithCustomer>();
+
+        // 🔥 prendi tutti gli id cliente distinti
+        var customerIds = updates
+            .Select(x => x.CustomerId)
+            .Distinct()
+            .ToList();
+
+        // 🔥 UNA SOLA query
+        var customers = await _customerRepository.GetByIdsAsync(customerIds);
+
+        // 🔥 dictionary per lookup O(1)
+        var customerDict = customers.ToDictionary(x => x.Id, x => x);
+
+        // 🔥 mapping finale
+        var result = updates.Select(fc => new FarmadatiUpdatesWithCustomer
+        {
+            Customer = customerDict.GetValueOrDefault(fc.CustomerId)!,
+            FarmadatiUpdate = fc
+        }).ToList();
+
+        return result;
+    }
     public async Task<FarmadatiUpdates?> GetByIdAsync(string id)
     {
         return await _context.FarmadatiUpdates
@@ -65,49 +110,111 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
     }
     private async Task ProcessFarmadatiCache(FarmadatiUpdates updates, CancellationToken token)
     {
-        var farmadatiCache = await _farmadatiCacheRepo.GetAll();
+        var customer = await _customerRepository.GetByIdAsync(updates.CustomerId);
+        if (customer == null) return;
 
-        var chunks = farmadatiCache.Chunk(200).ToList();
+        var root = _env.ContentRootPath;
+        var parent = Directory.GetParent(root)!.FullName;
+
+        var folder = Path.Combine(parent, "HeronFolder", customer.HeronFolder);
+        if (!Directory.Exists(folder)) return;
+
+        var pathFile = Directory.GetFiles(folder).FirstOrDefault();
+        if (pathFile == null) return;
+
+        var parsed = _parser.Parse(pathFile, customer.Id).ToList();
+
+        var cacheList = await _farmadatiCacheRepo.GetByAicsAsync(parsed.Select(x => x.Aic));
+        var cacheAics = cacheList.Select(x => x.Aic).ToHashSet();
+
+        var managementRepo = await _managementCacheRepo.GetByAicsAsync(parsed.Select(x => x.Aic));
+        var managementRepoAics = managementRepo.Select(x => x.Aic).ToHashSet();
+
+        var newItems = parsed
+            .Where(x => !cacheAics.Contains(x.Aic))
+            .ToList();
+
+        newItems = newItems
+            .Where(x=> !managementRepoAics.Contains(x.Aic))
+            .ToList();
 
         int worked = 0;
 
-        updates.productNumber = farmadatiCache.Count;
+        updates.productNumber = newItems.Count();
+        if (newItems.Count() == 0)
+        {
+            updates.productWorked = 0;
+            updates.EndedAt = DateTime.UtcNow;
+            await UpdateAsync(updates.Id!, updates);
+
+            return;
+        }
+
         await UpdateAsync(updates.Id!, updates);
+
+        var chunks = newItems.Chunk(50);
 
         foreach (var chunk in chunks)
         {
             token.ThrowIfCancellationRequested();
 
-            var updatedCaches = new ConcurrentBag<FarmadatiCache>();
+            var farmadatiList = new ConcurrentBag<FarmadatiCache>();
+            var managementList = new ConcurrentBag<ManagementCache>();
 
             await Parallel.ForEachAsync(chunk, new ParallelOptions
             {
-                CancellationToken = token,
-                MaxDegreeOfParallelism = 10
+                MaxDegreeOfParallelism = 10,
+                CancellationToken = token
             },
-            async (f, ct) =>
+            async (raw, ct) =>
             {
                 ct.ThrowIfCancellationRequested();
-                var enriched = await _productService.EnrichAsync(
-                    f.Aic,
-                    ObjectId.GenerateNewId().ToString(),
-                    ObjectId.GenerateNewId().ToString());
 
-                if (enriched == null) return;
+                try
+                {
+                    var enrichment = await _enrichmentService.EnrichAsync(
+                        raw.Aic,
+                        raw.CustomerId,
+                        ObjectId.GenerateNewId().ToString()
+                    );
 
-                f.Name = enriched.Name;
-                f.ShortDescription = enriched.ShortDescription;
-                f.LongDescription = enriched.LongDescription;
-                f.Images = enriched.Images;
-                f.CachedAt = DateTime.UtcNow;
-
-                updatedCaches.Add(f);
+                    if (enrichment != null)
+                    {
+                        farmadatiList.Add(new FarmadatiCache
+                        {
+                            Aic = enrichment.Aic,
+                            Name = enrichment.Name,
+                            ShortDescription = enrichment.ShortDescription!,
+                            LongDescription = enrichment.LongDescription!,
+                            Images = enrichment.Images,
+                            CachedAt = DateTime.UtcNow
+                        });
+                    }
+                    else
+                    {
+                        managementList.Add(new ManagementCache
+                        {
+                            Aic = raw.Aic,
+                            CachedAt = DateTime.UtcNow
+                        });
+                    }
+                }
+                catch
+                {
+                    // log se vuoi
+                }
             });
 
-            await _farmadatiCacheRepo.UpdateManyAsync(updatedCaches);
+            // 🚀 BULK INSERT
+            if (farmadatiList.Any())
+                await _farmadatiCacheRepo.InsertManyAsync(farmadatiList);
 
-            worked += updatedCaches.Count;
+            if (managementList.Any())
+                await _managementCacheRepo.InsertManyAsync(managementList);
 
+            worked += farmadatiList.Count + managementList.Count;
+
+            // 🔥 update ogni chunk, non ogni item
             updates.productWorked = worked;
             await UpdateAsync(updates.Id!, updates);
         }

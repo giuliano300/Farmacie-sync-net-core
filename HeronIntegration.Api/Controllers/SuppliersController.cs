@@ -40,7 +40,7 @@ public class SuppliersController : ControllerBase
                  return false;
             }
 
-           var res = await _processor.ImportAsync(code);
+            var res = await _processor.ImportAsync(code);
             if (res)
             {
                 await _repo.UpdateLastUpdate(code);

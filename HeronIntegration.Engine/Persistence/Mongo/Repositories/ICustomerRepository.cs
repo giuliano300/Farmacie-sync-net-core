@@ -11,9 +11,9 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
     {
         Task InsertAsync(Customer customer);
         Task<List<Customer>> GetActiveAsync();
-
         Task<List<Customer>> GetAllAsync();
         Task<Customer?> GetByIdAsync(string id);
+        Task<List<Customer>> GetByIdsAsync(IEnumerable<string> ids);
         Task UpdateAsync(Customer customer);
         Task DeleteAsync(string id);
     }
