@@ -10,4 +10,5 @@ public class ProductBaseInfo
     public string? ProductTypeCode { get; set; }
 
     public ProductCategory Category { get; set; }
+    public bool? error { get; set; }
 }

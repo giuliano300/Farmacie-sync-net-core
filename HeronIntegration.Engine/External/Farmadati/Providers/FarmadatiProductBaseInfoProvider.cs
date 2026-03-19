@@ -17,15 +17,15 @@ public class FarmadatiProductBaseInfoProvider : IProductBaseInfoProvider
 
     public async Task<ProductBaseInfo?> GetBaseInfoAsync(string productCode)
     {
-        var result = await _client.ExecuteQueryAsync(
-            "TE002",
-            new[]
-            {
-                "FDI_0001", // codice prodotto
-                "FDI_0004"  // nome prodotto
-            },
-            new[]
-            {
+        var result = default(dynamic);
+        try
+        {
+            result = await FarmadatiHelper.ExecuteWithRetry(() =>
+            _client.ExecuteQueryAsync(
+                "TE002",
+                new[] { "FDI_0001", "FDI_0004" },
+                new[]
+                {
                 new Filter
                 {
                     Key = "FDI_0001",
@@ -33,22 +33,32 @@ public class FarmadatiProductBaseInfoProvider : IProductBaseInfoProvider
                     Value = productCode,
                     OrGroup = 0
                 }
-            },
-            page: 1,
-            pageSize: 1
-        );
-
-        if (result == null)
-            return null;
+                },
+                page: 1,
+                pageSize: 1
+            ));
+        }
+        catch
+        {
+            // dopo tutti i retry falliti
+            return new ProductBaseInfo { error = true };
+        }
 
         if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
             return null;
 
-        var doc = XDocument.Parse(result.OutputValue);
+        XDocument doc;
 
-        var productNode = doc
-            .Descendants("Product")
-            .FirstOrDefault();
+        try
+        {
+            doc = XDocument.Parse(result.OutputValue);
+        }
+        catch
+        {
+            return new ProductBaseInfo { error = true };
+        }
+
+        var productNode = doc.Descendants("Product").FirstOrDefault();
 
         if (productNode == null)
             return null;
@@ -63,7 +73,8 @@ public class FarmadatiProductBaseInfoProvider : IProductBaseInfoProvider
         {
             ProductCode = code,
             Name = name,
-            ShortDescription = name // fallback iniziale
+            ShortDescription = name,
+            error = false
         };
     }
 }

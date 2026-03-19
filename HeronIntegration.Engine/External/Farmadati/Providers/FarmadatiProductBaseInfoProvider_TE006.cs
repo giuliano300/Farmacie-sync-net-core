@@ -17,28 +17,52 @@ public class FarmadatiProductBaseInfoProvider_TE006 : IProductBaseInfoProvider
 
     public async Task<ProductBaseInfo?> GetBaseInfoAsync(string productCode)
     {
-        var result = await _client.ExecuteQueryAsync(
-            "TE006",
-            new[] { "FDI_0001", "FDI_0004" },
-            new[]
-            {
-                new Filter { Key = "FDI_0001", Operator = "=", Value = productCode, OrGroup = 0 }
-            },
-            page: 1,
-            pageSize: 1
-        );
+        var result = default(object);
 
-        if (result == null)
+        try
+        {
+            result = await FarmadatiHelper.ExecuteWithRetry(() =>
+                _client.ExecuteQueryAsync(
+                    "TE006",
+                    new[] { "FDI_0001", "FDI_0004" },
+                    new[]
+                    {
+                    new Filter
+                    {
+                        Key = "FDI_0001",
+                        Operator = "=",
+                        Value = productCode,
+                        OrGroup = 0
+                    }
+                    },
+                    page: 1,
+                    pageSize: 1
+                )
+            );
+        }
+        catch
+        {
+            return new ProductBaseInfo { error = true };
+        }
+
+        // 👉 cast se non hai tipo forte
+        dynamic r = result;
+
+        if (r.NumRecords == 0 || string.IsNullOrWhiteSpace(r.OutputValue))
             return null;
 
-        if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
-            return null;
+        XDocument doc;
 
-        var doc = XDocument.Parse(result.OutputValue);
+        try
+        {
+            doc = XDocument.Parse(r.OutputValue);
+        }
+        catch
+        {
+            return new ProductBaseInfo { error = true };
+        }
 
-        var productNode = doc
-            .Descendants("Product")
-            .FirstOrDefault();
+        var productNode = doc.Descendants("Product").FirstOrDefault();
 
         if (productNode == null)
             return null;
@@ -53,7 +77,8 @@ public class FarmadatiProductBaseInfoProvider_TE006 : IProductBaseInfoProvider
         {
             ProductCode = code,
             Name = name,
-            ShortDescription = name // fallback iniziale
+            ShortDescription = name,
+            error = false
         };
     }
 }

@@ -18,55 +18,73 @@ public class FarmadatiProductBaseInfoProvider_TE003 : IProductBaseInfoProvider
 
     public async Task<ProductBaseInfo?> GetBaseInfoAsync(string productCode)
     {
-        var result = await _client.ExecuteQueryAsync(
-            "TE003",
-            new[]
-            {
-                "FDI_0001",
-                "FDI_1760",
-                "FDI_1761",
-                "FDI_1778",
-                "FDI_1764",
-                "FDI_1765",
-                "FDI_1766",
-                "FDI_1767",
-                "FDI_1768",
-                "FDI_1769",
-                "FDI_1770",
-                "FDI_1771",
-                "FDI_1772",
-                "FDI_1781"
-            },
-            new[]
-            {
-                new Filter
-                {
-                    Key = "FDI_0001",
-                    Operator = "=",
-                    Value = productCode,
-                    OrGroup = 0
-                }
-            },
-            page: 1,
-            pageSize: 1
-        );
+        var result = default(object);
 
-        if (result == null)
+        try
+        {
+            result = await FarmadatiHelper.ExecuteWithRetry(() =>
+                _client.ExecuteQueryAsync(
+                    "TE003",
+                    new[]
+                    {
+                    "FDI_0001","FDI_1760","FDI_1761","FDI_1778",
+                    "FDI_1764","FDI_1765","FDI_1766","FDI_1767",
+                    "FDI_1768","FDI_1769","FDI_1770","FDI_1771",
+                    "FDI_1772","FDI_1781"
+                    },
+                    new[]
+                    {
+                    new Filter
+                    {
+                        Key = "FDI_0001",
+                        Operator = "=",
+                        Value = productCode,
+                        OrGroup = 0
+                    }
+                    },
+                    page: 1,
+                    pageSize: 1
+                )
+            );
+        }
+        catch
+        {
+            return new ProductBaseInfo { error = true };
+        }
+
+        // 👇 cast tipico (se non hai tipo forte)
+        dynamic r = result;
+
+        if (r.NumRecords == 0 || string.IsNullOrWhiteSpace(r.OutputValue))
             return null;
 
-        if (result.NumRecords == 0)
-            return null;
+        XDocument doc;
 
-        var doc = XDocument.Parse(result.OutputValue);
+        try
+        {
+            doc = XDocument.Parse(r.OutputValue);
+        }
+        catch
+        {
+            return new ProductBaseInfo { error = true };
+        }
+
         var product = doc.Descendants("Product").FirstOrDefault();
+
         if (product == null)
+            return null;
+
+        var name = product.Element("FDI_1760")?.Value;
+
+        if (string.IsNullOrWhiteSpace(name))
             return null;
 
         return new ProductBaseInfo
         {
             ProductCode = productCode,
-            Name = product.Element("FDI_1760")?.Value!,
-            ShortDescription = product.Element("FDI_1760")?.Value!
+            Name = name,
+            ShortDescription = name,
+            error = false
         };
     }
 }

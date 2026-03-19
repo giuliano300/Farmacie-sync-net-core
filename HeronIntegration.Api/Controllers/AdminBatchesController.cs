@@ -62,8 +62,11 @@ public class BatchController : ControllerBase
         {
             var customer = await _customerRepo.GetByIdAsync(customerId);
             if (customer == null)
-                return NotFound();
-        
+                return StatusCode(500, new
+                {
+                    error = "Utente non trovato"
+                });
+
             var root = _env.ContentRootPath;
             var parent = Directory.GetParent(root)!.FullName;
 
@@ -73,11 +76,17 @@ public class BatchController : ControllerBase
                 customer.HeronFolder
             );
             if (!Directory.Exists(folder))
-                return NotFound(); 
+                return StatusCode(500, new
+                {
+                    error = "Folder non trovato : " + folder
+                });
 
             var pathFile = Directory.GetFiles(folder).FirstOrDefault();
             if (pathFile == null)
-                return NotFound();
+                return StatusCode(500, new
+                {
+                    error = "Path file non trovato : " + pathFile
+                });
 
             var seq = await _batchRepo.GetNextSequenceAsync(customerId);
             var batch = new BatchExecution
@@ -100,9 +109,12 @@ public class BatchController : ControllerBase
         }
         catch(Exception e)
         {
-
+            return StatusCode(500, new
+            {
+                error = e.Message,
+                stack = e.StackTrace
+            });
         }
-        return NotFound();
     }
 
     [HttpPost("{batchId}/{stepId}/restart")]

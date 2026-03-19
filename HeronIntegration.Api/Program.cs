@@ -142,6 +142,7 @@ builder.Services.AddScoped<ISupplierParser, SofarmaParser>();
 builder.Services.AddScoped<ISupplierParser, GuacciParser>();
 builder.Services.AddScoped<ISupplierParser, AllianceParser>();
 builder.Services.AddScoped<ISupplierParser, HeringParser>();
+builder.Services.AddScoped<ISupplierParser, FarvimaParser>();
 
 builder.Services.AddScoped<IManagementCacheRepository, ManagementCacheRepository>();
 

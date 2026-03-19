@@ -134,10 +134,6 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
             .Where(x => !cacheAics.Contains(x.Aic))
             .ToList();
 
-        newItems = newItems
-            .Where(x=> !managementRepoAics.Contains(x.Aic))
-            .ToList();
-
         int worked = 0;
 
         updates.productNumber = newItems.Count();

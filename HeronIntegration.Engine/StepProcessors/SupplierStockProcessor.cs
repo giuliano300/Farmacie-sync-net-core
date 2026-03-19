@@ -4,6 +4,7 @@ using HeronIntegration.Engine.Steps;
 using HeronIntegration.Engine.Suppliers;
 using HeronIntegration.Shared.Entities;
 using Microsoft.Extensions.Hosting;
+using System.IO;
 
 public class SupplierStockProcessor : ISupplierStockProcessor
 {
@@ -46,34 +47,53 @@ public class SupplierStockProcessor : ISupplierStockProcessor
                 "SupplierFiles",
                 supplierCode.ToUpper()
             );
-            if (Directory.Exists(folder))
-                Directory.Delete(folder, true);
 
-            Directory.CreateDirectory(folder);
+            FtpListItem latestFile = null;
 
-            var ftp = new FtpClient(supplier.FtpHost, supplier.FtpUser, supplier.FtpPassword);
+            try
+            {
+                var ftp = new FtpClient(supplier.FtpHost, supplier.FtpUser, supplier.FtpPassword);
 
-            ftp.Connect();
+                ftp.Connect();
 
-            var files = ftp.GetListing();
+                var files = ftp.GetListing();
 
-            // 👉 prendi il più recente
-            var latestFile = files
-                .Where(x => x.Type == FtpObjectType.File)
-                .OrderByDescending(x => x.Modified)
-                .FirstOrDefault();
+                // 👉 prendi il più recente
+                latestFile = files
+                    .Where(x => x.Type == FtpObjectType.File)
+                    .OrderByDescending(x => x.Modified)
+                    .FirstOrDefault()!;
 
-            if (latestFile == null)
-                return null;
+                if (latestFile == null)
+                    return null;
 
-            var localPath = Path.Combine(folder, latestFile.Name);
+                if (Directory.Exists(folder))
+                    Directory.Delete(folder, true);
 
-            ftp.DownloadFile(localPath, latestFile.FullName);
+                Directory.CreateDirectory(folder);
 
-            ftp.Disconnect();
+                var localPath = Path.Combine(folder, latestFile.Name);
 
-            return latestFile.FullName;
+                ftp.DownloadFile(localPath, latestFile.FullName);
 
+                ftp.Disconnect();
+
+                return latestFile.FullName;
+            }
+            catch(Exception e)
+            {
+                if (Directory.Exists(folder))
+                {
+                    var file = new DirectoryInfo(folder)
+                    .GetFiles()
+                    .OrderByDescending(f => f.LastWriteTime)
+                    .FirstOrDefault();
+                    if (file == null)
+                        return null;
+
+                    return file!.FullName;
+                }
+            };
         }
         catch(Exception e)
         {
