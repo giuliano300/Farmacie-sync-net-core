@@ -12,6 +12,7 @@ public class BatchExecution
     public string CustomerId { get; set; } = default!;
 
     public int SequenceNumber { get; set; }
+    public TypeRun? type { get; set; } = null;
 
     public DateTime StartedAt { get; set; }
 

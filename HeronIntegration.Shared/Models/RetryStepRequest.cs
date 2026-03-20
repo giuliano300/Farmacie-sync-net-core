@@ -6,4 +6,7 @@ public class RetryStepRequest
 {
     public string Step { get; set; } = default!;
     public string BatchId { get; set; } = default!;
+
+    public TypeRun? type { get; set; } = default!;
+
 }

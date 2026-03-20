@@ -13,4 +13,11 @@ namespace HeronIntegration.Shared.Enums
         Suppliers = 3,
         Magento = 4
     }
+    public enum TypeRun
+    {
+        Completo = 0,
+        ImpportProdotti = 1,
+        UpdatePrezzi = 2,
+        ImportImmagini = 3
+    }
 }

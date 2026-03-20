@@ -3,11 +3,13 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
+using MongoDB.Bson.IO;
 using Renci.SshNet;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Channels;
 
 public class MagentoExporter : IMagentoExporter
@@ -124,6 +126,8 @@ public class MagentoExporter : IMagentoExporter
             Encoding.UTF8,
             "application/json"
         );
+
+        var j = JsonSerializer.Serialize(payload);
 
         await SendAsync(request, token);
 
@@ -380,7 +384,7 @@ public class MagentoExporter : IMagentoExporter
                 await SendAsync(request, token);
             }
 
-            //await _exportRepo.SetStatusAsync(p.BatchId.ToString(), p.Aic, ExportStatus.InsertImages);
+            await _exportRepo.SetStatusAsync(p.BatchId.ToString(), p.Aic, ExportStatus.InsertImages);
 
             result.Success = true;
         }

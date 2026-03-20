@@ -3,6 +3,7 @@ using HeronIntegration.Engine.External.Farmadati.Enrichment;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using System.Linq.Expressions;
 
@@ -38,7 +39,7 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
     }
 
-    public async Task<StepExecutionResult?> ExecuteAsync(string batchId, CancellationToken token)
+    public async Task<StepExecutionResult?> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
     {
         var result = new StepExecutionResult();
         result.StartedAt = DateTime.Now;

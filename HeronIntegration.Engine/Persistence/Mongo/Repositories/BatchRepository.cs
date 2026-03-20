@@ -309,6 +309,7 @@ public class BatchRepository : IBatchRepository
         int exportInsert = 0;
         int exportUpdatePrice = 0;
         int exportError = 0;
+        int exportInsertImage = 0;
 
         foreach (var e in export)
         {
@@ -330,9 +331,9 @@ public class BatchRepository : IBatchRepository
                     exportUpdatePrice++;
                     break;
 
-                //case ExportStatus.InsertImages:
-                //    exportInsertImage++;
-                //    break;
+                case ExportStatus.InsertImages:
+                    exportInsertImage++;
+                    break;
 
                 case ExportStatus.Error:
                     exportError++;
@@ -350,6 +351,7 @@ public class BatchRepository : IBatchRepository
 
             CurrentStep = currentStep?.Step ?? "",
             StepStatus = currentStep?.Status ?? StepStatus.Pending,
+            type = (TypeRun)batch.type!,
 
             HeronImport = new StepMetrics
             {
@@ -378,6 +380,7 @@ public class BatchRepository : IBatchRepository
                 Errors = exportErrors,
                 Insert = exportInsert,
                 UpdatePrice = exportUpdatePrice,
+                InsertImages = exportInsertImage,
                 Pending = exportPending
             }
         };

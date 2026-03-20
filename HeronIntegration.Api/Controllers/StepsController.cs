@@ -1,8 +1,10 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
+using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
 using System.Collections.Concurrent;
 
 namespace HeronIntegration.Admin.Api.Controllers;
@@ -15,6 +17,9 @@ public class StepsController : ControllerBase
     private readonly IStepRepository _stepRepo;
     private readonly ICleanupService _cleanupService;
     private readonly BatchProcessManager _processManager;
+    private readonly IEnrichedProductRepository _enrichedRepo;
+    private readonly IResolvedProductRepository _resolvedRepo;
+
 
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _runningSteps = new();
 
@@ -30,12 +35,16 @@ public class StepsController : ControllerBase
         IStepProcessorResolver resolver,
         IStepRepository stepRepo,
         ICleanupService cleanupService,
-        BatchProcessManager processManager)
+        BatchProcessManager processManager,
+        IEnrichedProductRepository enrichedRepo,
+        IResolvedProductRepository resolvedRepo)
     {
         _resolver = resolver;
         _stepRepo = stepRepo;
         _cleanupService = cleanupService;
         _processManager = processManager;
+        _enrichedRepo = enrichedRepo;
+        _resolvedRepo = resolvedRepo;
     }
 
     [HttpGet("{batchId}")]
@@ -102,6 +111,24 @@ public class StepsController : ControllerBase
             await _cleanupService.CleanupPipeLineAsync(req.Step, req.BatchId);
 
             await ExecutePipeline(req.BatchId, req.Step, token);
+
+        }, null, token);
+
+        return Ok();
+    }
+
+    [HttpPost("retryByType")]
+    public async Task<IActionResult> RetryByType(RetryStepRequest req)
+    {
+        StopRunningBatch(req.BatchId);
+
+        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
+
+        _ = RunBackground(async () =>
+        {
+            await _cleanupService.CleanupPipeLineAsync(req.Step, req.BatchId);
+
+            await ExecutePipelineByType(req.BatchId, req.Step, req.type!, token);
 
         }, null, token);
 
@@ -201,5 +228,134 @@ public class StepsController : ControllerBase
                 break;
             }
         }
+    }
+    private async Task ExecutePipelineByType(string batchId, string startStep, TypeRun? type, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        //IMPORT HERON
+        var stepName = OrderedSteps[0];
+
+        var step = await _stepRepo.GetStepAsync(batchId, stepName);
+
+        if (step == null)
+            return;
+
+        var stepId = step.Id.ToString();
+
+        await _stepRepo.SetRunningAsync(stepId);
+
+        var processor = _resolver.Resolve(stepName);
+
+        var result = await processor.ExecuteAsync(batchId, token);
+
+        if (result.Success)
+        {
+            await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+        }
+        else
+        {
+            await _stepRepo.SetErrorAsync(stepId, result.ErrorMessage!);
+            return;
+        }
+
+        //FARMADATI
+        stepName = OrderedSteps[1];
+
+        step = await _stepRepo.GetStepAsync(batchId, stepName);
+
+        if (step == null)
+            return;
+
+        stepId = step.Id.ToString();
+
+        await _stepRepo.SetRunningAsync(stepId);
+
+        processor = _resolver.Resolve(stepName);
+
+        result = await processor.ExecuteAsync(batchId, token);
+
+        if (result.Success)
+        {
+            await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+        }
+        else
+        {
+            await _stepRepo.SetErrorAsync(stepId, result.ErrorMessage!);
+            return;
+        }
+
+        //CONFRONTO SUPPLIER
+        stepName = OrderedSteps[2];
+        step = await _stepRepo.GetStepAsync(batchId, stepName);
+        if (step == null)
+            return;
+
+        stepId = step.Id.ToString();
+
+        if(type != TypeRun.ImportImmagini)
+        {
+
+            await _stepRepo.SetRunningAsync(stepId);
+
+            processor = _resolver.Resolve(stepName);
+
+            result = await processor.ExecuteAsync(batchId, token);
+
+            if (result.Success)
+            {
+                await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+            }
+            else
+            {
+                await _stepRepo.SetErrorAsync(stepId, result.ErrorMessage!);
+                return;
+            }
+
+        }
+        else
+        {
+            //FA UNA COPIA SENZA CONTROLLARE
+            var batchObjectId = ObjectId.Parse(batchId);
+
+            var raws = await _enrichedRepo.GetByBatchAsync(batchId);
+            var resolvedList = new List<ResolvedProduct>(raws.Count);
+
+            foreach (var raw in raws)
+            {
+                // HERON sempre candidato
+                var chosen = new SupplierStock
+                {
+                    SupplierCode = "HERON",
+                    Aic = raw.Aic,
+                    Price = raw.HeronPrice,
+                    Availability = raw.HeronStock
+                };
+
+                resolvedList.Add(ResolvedProduct.MapToResolved(raw, chosen, batchObjectId));
+            }
+
+            if (resolvedList.Count > 0)
+                await _resolvedRepo.InsertManyAsync(resolvedList);
+
+            await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+        }
+
+        //MAGENTO
+        stepName = OrderedSteps[3];
+        step = await _stepRepo.GetStepAsync(batchId, stepName);
+        if (step == null)
+            return;
+
+        stepId = step.Id.ToString();
+
+        await _stepRepo.SetRunningAsync(stepId);
+
+        processor = _resolver.Resolve(stepName);
+
+        result = await processor.ExecuteAsync(batchId, token, type);
+
+        await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
+
     }
 }

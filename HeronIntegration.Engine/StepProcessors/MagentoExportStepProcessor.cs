@@ -39,178 +39,61 @@ public class MagentoExportStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
     }
 
-    public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token)
+    public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = 0)
     {
-        var result = new StepExecutionResult
-        {
-            StartedAt = DateTime.UtcNow
-        };
+        var result = new StepExecutionResult { StartedAt = DateTime.UtcNow };
 
         try
         {
+            if (type == null)
+                type = TypeRun.Completo;
+
             await _cleanupService.updateExportExecution(batchId);
 
-            var step = await _stepRepo.GetStepAsync(batchId, "Magento");
-            if (step == null)
-            {
-                result.ErrorMessage = "Nessun step trovato";
-                return result;
-            }
+            var step = await _stepRepo.GetStepAsync(batchId, "Magento")
+                ?? throw new Exception("Nessun step trovato");
 
             await _stepRepo.SetRunningAsync(step.Id.ToString());
 
-            //CARICAMENTO DATI CUSTOMER
             var batch = await _batchRepo.GetByIdAsync(batchId);
-            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId)
+                ?? throw new Exception("Customer non trovato");
 
-            if (customer?.Magento == null)
+            if (customer.Magento == null)
                 throw new Exception("Magento config mancante");
 
-            var _exporter = _magentoExporterFactory.Create(customer.Magento);
-
-
-            // =====================================================
-            // CARICAMENTO METADATI MAGENTO
-            // =====================================================
-            var magentoMetatada = await _exporter.GetMagentoMetadataAsync(batchId, token);
-
-            var magentoDict = magentoMetatada.magentoProducts!
-                .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
-
-            // =====================================================
-            //  CARICAMENTO PRODOTTI MONGO
-            // =====================================================
+            var exporter = _magentoExporterFactory.Create(customer.Magento);
             var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
 
-            var mappedList = resolvedList.Select(p =>
-            {
-                return new ResolvedProduct
-                {
-                    BatchId = p.BatchId,
-                    Aic = p.Aic,
-                    Name = p.Name,
-                    Price = p.Price,
-                    Availability = p.Availability,
-                    LongDescription = p.LongDescription,
-                    ShortDescription = p.ShortDescription,
-                    SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
-                                    magentoMetatada.suppliers!.TryGetValue(p.SupplierCode, out var supplierId))
-                                        ? supplierId.ToString()
-                                        : "0",
-                    Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
-                                magentoMetatada.manufacturers!.TryGetValue(p.Producer, out var manufacturerId))
-                                        ? manufacturerId.ToString()
-                                        : "0",
-                    SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
-                                   _exporter.ResolveCategoryId(magentoMetatada.categories!, p.SubCategory, token) is int categoryId)
-                                        ? categoryId.ToString()
-                                        : null,
-                    Images = p.Images
-                };
-            }).ToList();
+            // 🔹 mapping unico
+            var mapped = MapProducts(resolvedList);
 
-            var mongoDict = mappedList
-                .ToDictionary(x => x.Aic, StringComparer.OrdinalIgnoreCase);
+            // 🔹 download prodotti
+            var metadata = await exporter.GetMagentoMetadataAsync(batchId, token);
+            var magentoSet = metadata.magentoProducts!
+                .Select(x => x.Sku)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // =====================================================
-            // CALCOLO UPSERT (insert + update)
-            // =====================================================
-            var toUpsert = new List<ResolvedProduct>();
-            var toSkipUpsert = new List<ResolvedProduct>();
-
-            foreach (var mongoProduct in mappedList)
-            {
-                if (!magentoDict.TryGetValue(mongoProduct.Aic, out var magentoProduct))
-                {
-                    toUpsert.Add(mongoProduct);
-                    continue;
-                }
-
-                bool needsUpdate = false;
-
-                if (magentoProduct.Price != mongoProduct.Price)
-                    needsUpdate = true;
-
-                if ((magentoProduct.Manufacturer ?? "") != (mongoProduct.Producer ?? ""))
-                    needsUpdate = true;
-
-                if ((magentoProduct.Supplier ?? "") != (mongoProduct.SupplierCode ?? ""))
-                    needsUpdate = true;
-
-                if ((magentoProduct.Description ?? "").Trim() !=
-                    (mongoProduct.ShortDescription ?? "").Trim() && ((magentoProduct.Description ?? "").Trim() !=
-                    (mongoProduct.LongDescription ?? "").Trim()))
-                    needsUpdate = true;
-
-                var mongoCats = new HashSet<string>(
-                    new[] { mongoProduct.SubCategory! }
-                        .Where(x => !string.IsNullOrWhiteSpace(x)));
-
-                var magentoCats = new HashSet<string>(
-                    magentoProduct.Categories ?? new List<string>());
-
-                if (!mongoCats.IsSubsetOf(magentoCats))
-                    needsUpdate = true;
-
-                if (needsUpdate)
-                    toUpsert.Add(mongoProduct);
-                else
-                    toSkipUpsert.Add(mongoProduct);
-            }
-
-            // =====================================================
-            // SKU DA DISABILITARE
-            // =====================================================
-            var toDisable = magentoMetatada.magentoProducts!
-                .Where(m => !mongoDict.ContainsKey(m.Sku))
-                .Select(m => m.Sku)
+            // 🔹 prendi SOLO quelli presenti in Magento
+            var mappedExisting = mapped
+                .Where(p => magentoSet.Contains(p.Aic))
                 .ToList();
 
+            // 🔹 UPSERT
+            if (type is TypeRun.Completo or TypeRun.ImpportProdotti)
+                await HandleProductUpsert(metadata, mapped, exporter, batchId, token, type);
 
-            // =====================================================
-            //  UPSERT
-            // =====================================================
-            if (toSkipUpsert.Any())
-                await _exportRepo.ChangeStatusAsync(batchId, toSkipUpsert, ExportStatus.Insert);
+            // 🔹 STOCK
+            if (type is TypeRun.Completo or TypeRun.UpdatePrezzi)
+                await HandleStockUpdate(mappedExisting, exporter, batchId, token);
 
-            if (toUpsert.Any())
-                await _exporter.ImportProductsAsync(toUpsert, token);
+            // 🔹 IMMAGINI
+            if (type == TypeRun.ImportImmagini)
+                await exporter.UpdateImageBulkAsync(mappedExisting, token);
 
-            // =====================================================
-            // DISABILITAZIONE PRODOTTI MANCANTI
-            // =====================================================
-            if (toDisable.Any())
-                await _exporter.DisableProductsAsync(toDisable, token);
-
-            // =====================================================
-            //  UPDATE STOCK
-            // =====================================================
-            await _exporter.UpdateStockBulkAsync(
-                mappedList.Select(p => new InventoryItem
-                {
-                    Id = batchId,
-                    Sku = p.Aic,
-                    Qty = p.Availability
-                })
-                .ToList(), token);
-
-            // =====================================================
-            //  UPLOAD IMMAGINI SOLO PER UPSERT(AGGIUNTO NELL'INSERIMENTO)
-            // =====================================================
-            //var all = mappedList;
-            //await _exporter.UpdateImageBulkAsync(all, token);
-
-            // =====================================================
-            // CRON MAGENTO
-            // =====================================================
-            await _exporter.RunMagentoCronAsync(token);
-
-            // =====================================================
-            // FINALIZZAZIONE
-            // =====================================================
+            // 🔹 CRON + FINALIZE
+            await exporter.RunMagentoCronAsync(token);
             await _batchFinalizer.FinalizeBatchAsync(batchId);
-
-            //await _exportRepo.ChangeStatusAsync(batchId, resolvedList, ExportStatus.Success);
 
             result.Success = true;
         }
@@ -222,5 +105,158 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         result.FinishedAt = DateTime.UtcNow;
         return result;
+    }
+
+    private List<ResolvedProduct> MapProducts(List<ResolvedProduct> source)
+    {
+        return source.Select(p => new ResolvedProduct
+        {
+            BatchId = p.BatchId,
+            Aic = p.Aic,
+            Name = p.Name,
+            Price = p.Price,
+            Availability = p.Availability,
+            LongDescription = p.LongDescription?.Trim(),
+            ShortDescription = p.ShortDescription?.Trim(),
+            SupplierCode = p.SupplierCode,
+            Producer = p.Producer,
+            SubCategory = p.SubCategory,
+            Images = p.Images
+        }).ToList();
+    }
+
+    private async Task HandleProductUpsert(
+        MagentoMetadata metadata,
+        List<ResolvedProduct> mapped,
+        IMagentoExporter exporter,
+        string batchId,
+        CancellationToken token,
+        TypeRun? type)
+    {
+
+        var magentoDict = metadata.magentoProducts!
+            .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
+
+        var mappedList = mapped.Select(p =>
+        {
+            return new ResolvedProduct
+            {
+                BatchId = p.BatchId,
+                Aic = p.Aic,
+                Name = p.Name,
+                Price = p.Price,
+                Availability = p.Availability,
+                LongDescription = p.LongDescription,
+                ShortDescription = p.ShortDescription,
+                SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
+                                metadata.suppliers!.TryGetValue(p.SupplierCode, out var supplierId))
+                                    ? supplierId.ToString()
+                                    : "0",
+                Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
+                            metadata.manufacturers!.TryGetValue(p.Producer, out var manufacturerId))
+                                    ? manufacturerId.ToString()
+                                    : "0",
+                SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
+                               exporter.ResolveCategoryId(metadata.categories!, p.SubCategory, token) is int categoryId)
+                                    ? categoryId.ToString()
+                                    : null,
+                Images = p.Images
+            };
+        }).ToList();
+
+        var toUpsert = new List<ResolvedProduct>();
+        var toSkip = new List<ResolvedProduct>();
+
+        foreach (var p in mappedList)
+        {
+            if (!magentoDict.TryGetValue(p.Aic, out var m))
+            {
+                toUpsert.Add(p);
+                continue;
+            }
+
+            if (NeedsUpdate(p, m, exporter, metadata))
+                toUpsert.Add(p);
+            else
+                toSkip.Add(p);
+        }
+
+        if (toSkip.Count > 0)
+            await _exportRepo.ChangeStatusAsync(batchId, toSkip, ExportStatus.Insert);
+
+        if (toUpsert.Count > 0)
+            await exporter.ImportProductsAsync(toUpsert, token);
+
+        if (type == TypeRun.Completo)
+        {
+            var mongoSet = mapped.Select(x => x.Aic)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var toDisable = metadata.magentoProducts!
+                .Where(m => !mongoSet.Contains(m.Sku))
+                .Select(m => m.Sku)
+                .ToList();
+
+            if (toDisable.Count > 0)
+                await exporter.DisableProductsAsync(toDisable, token);
+        }
+    }
+
+    private bool NeedsUpdate(
+    ResolvedProduct mongo,
+    MagentoSlimProduct magento,
+    IMagentoExporter exporter,
+    MagentoMetadata metadata)
+    {
+        if (magento.Price != mongo.Price)
+            return true;
+
+        if (!StringEquals(magento.Manufacturer, mongo.Producer))
+            return true;
+
+        if (!StringEquals(magento.Supplier, mongo.SupplierCode))
+            return true;
+
+        if (!DescriptionEquals(magento, mongo))
+            return true;
+
+        var mongoCat = exporter
+            .ResolveCategoryId(metadata.categories!, mongo.SubCategory, default)
+            ?.ToString();
+
+        if (!string.IsNullOrWhiteSpace(mongoCat) &&
+            !(magento.Categories ?? new List<string>()).Contains(mongoCat))
+            return true;
+
+        return false;
+    }
+
+    private static bool StringEquals(string? a, string? b)
+    {
+        return string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool DescriptionEquals(MagentoSlimProduct m, ResolvedProduct p)
+    {
+        var desc = m.Description?.Trim() ?? "";
+
+        return desc == (p.ShortDescription ?? "").Trim() ||
+               desc == (p.LongDescription ?? "").Trim();
+    }
+
+    private async Task HandleStockUpdate(
+    List<ResolvedProduct> mapped,
+    IMagentoExporter exporter,
+    string batchId,
+    CancellationToken token)
+    {
+        var items = mapped.Select(p => new InventoryItem
+        {
+            Id = batchId,
+            Sku = p.Aic,
+            Qty = p.Availability
+        }).ToList();
+
+        await exporter.UpdateStockBulkAsync(items, token);
     }
 }

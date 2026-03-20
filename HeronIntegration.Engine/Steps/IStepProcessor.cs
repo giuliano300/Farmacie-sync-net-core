@@ -1,4 +1,5 @@
-﻿using HeronIntegration.Shared.Models;
+﻿using HeronIntegration.Shared.Enums;
+using HeronIntegration.Shared.Models;
 
 namespace HeronIntegration.Engine.Steps;
 
@@ -6,5 +7,5 @@ public interface IStepProcessor
 {
     string Step { get; }
 
-    Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token);
+    Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null);
 }

@@ -56,7 +56,7 @@ public class BatchController : ControllerBase
         => Ok(await _stepRepo.GetByBatchAsync(batchId));
 
     [HttpPost("create")]
-    public async Task<ActionResult> Create(string customerId)
+    public async Task<ActionResult> Create(string customerId, TypeRun? type = null)
     {
         try
         {
@@ -98,7 +98,8 @@ public class BatchController : ControllerBase
                 Status = BatchStatus.Running,
                 TriggeredBy = "Admin",
                 HeronFileName = Path.GetFileName(pathFile),
-                HeronFilePath = pathFile
+                HeronFilePath = pathFile,
+                type = type
             };
 
             var batchId = await _batchRepo.CreateAsync(batch);

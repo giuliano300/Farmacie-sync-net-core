@@ -158,9 +158,16 @@ public class ExportRepository : IExportRepository
 
     public async Task<BatchReport> BuildBatchReportAsync(string batchId)
     {
+        int tot = 0;
         var total = await _context.ExportExecutions.Find(
             x => x.BatchId == ObjectId.Parse(batchId)
         ).ToListAsync();
+
+        tot = total.Count();
+
+        var batch = await _context.BatchExecutions.Find(a => a.Id == ObjectId.Parse(batchId)).FirstAsync();
+        if (batch.type < TypeRun.UpdatePrezzi)
+            tot = (int)batch.totalMagentoProducts!;
 
         var success = total.Count(a => a.Status == ExportStatus.Success);
 
@@ -176,7 +183,7 @@ public class ExportRepository : IExportRepository
         {
             BatchId = batchId,
             FinishedAt = DateTime.UtcNow,
-            TotalProducts = (int)total.Count(),
+            TotalProducts = tot,
             Insert = (int)import,
             UpdatePrice = (int)prices,
             InsertImages = (int)images,
