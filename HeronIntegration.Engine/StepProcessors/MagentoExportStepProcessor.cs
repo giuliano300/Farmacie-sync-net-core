@@ -156,10 +156,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                             metadata.manufacturers!.TryGetValue(p.Producer, out var manufacturerId))
                                     ? manufacturerId.ToString()
                                     : "0",
-                SubCategory = (!string.IsNullOrWhiteSpace(p.SubCategory) &&
-                               exporter.ResolveCategoryId(metadata.categories!, p.SubCategory, token) is int categoryId)
-                                    ? categoryId.ToString()
-                                    : null,
+                SubCategory = p.MagentoCategoryId == null ? null : p.MagentoCategoryId.ToString(),
                 Images = p.Images
             };
         }).ToList();

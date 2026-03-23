@@ -61,4 +61,10 @@ public class MongoContext
     public IMongoCollection<BatchReport> BatchReports =>
     _database.GetCollection<BatchReport>("batch_report");
 
+    public IMongoCollection<CustomerMagentoCategories> CustomerMagentoCategories =>
+    _database.GetCollection<CustomerMagentoCategories>("customer_magento_categories");
+
+    public IMongoCollection<CustomerManagementCategories> CustomerManagementCategories =>
+    _database.GetCollection<CustomerManagementCategories>("customer_management_categories");
+
 }

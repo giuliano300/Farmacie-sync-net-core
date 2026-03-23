@@ -5,6 +5,7 @@ using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
+using Renci.SshNet.Security;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
@@ -76,13 +77,15 @@ public class HeronImportStepProcessor : IStepProcessor
 
             foreach (var p in parsed)
             {
+                var key = $"{p.Category}|{p.SubCategory}";
 
-                var catKey = (p.Category, p.SubCategory);
+                int? magentoCategoryId = null;
 
-                var (category, subCategory) =
-                    categoryMap.TryGetValue(catKey!, out var mapped)
-                        ? mapped
-                        : (p.Category, p.SubCategory);
+                if (categoryMap.TryGetValue(key, out var mapped))
+                {
+                    magentoCategoryId = mapped;
+                }
+
 
                 var producer =
                     producerMap.TryGetValue(p.Producer!, out var mappedProducer)
@@ -98,9 +101,10 @@ public class HeronImportStepProcessor : IStepProcessor
                     Price = p.Price,
                     Stock = p.Stock,
                     CreatedAt = DateTime.UtcNow,
-                    Category = category,
-                    SubCategory = subCategory,
-                    Producer = producer
+                    MagentoCategoryId = magentoCategoryId,
+                    Producer = producer,
+                    Category = p.Category,
+                    SubCategory = p.SubCategory
                 });
 
                 exportRows.Add(new ExportExecution

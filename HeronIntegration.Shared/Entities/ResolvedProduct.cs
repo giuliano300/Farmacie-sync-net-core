@@ -15,6 +15,7 @@ public class ResolvedProduct
     public string? Category { get; set; }
 
     public string? SubCategory { get; set; }
+    public int? MagentoCategoryId { get; set; }
 
     public string? Producer { get; set; }
 
@@ -50,6 +51,7 @@ public class ResolvedProduct
             CustomerId = raw.CustomerId,
             Category = raw.Category,
             SubCategory = raw.SubCategory,
+            MagentoCategoryId = raw.MagentoCategoryId,
             Producer = raw.Producer,
             Aic = raw.Aic,
             Name = raw.Name,

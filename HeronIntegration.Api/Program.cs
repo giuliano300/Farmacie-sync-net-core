@@ -130,6 +130,9 @@ builder.Services.AddScoped<ICategoryResolver, CategoryResolver>();
 builder.Services.AddScoped<IProducerMappingRepository, ProducerMappingRepository>();
 builder.Services.AddScoped<IProducerResolver, ProducerResolver>();
 
+builder.Services.AddScoped<ICustomerMagentoCategoriesRepository, CustomerMagentoCategoriesRepository>();
+builder.Services.AddScoped<ICustomerManagementCategoriesRepository, CustomerManagementCategoriesRepository>();
+
 
 builder.Services.AddScoped<ISupplierStockProcessor, SupplierStockProcessor>();
 

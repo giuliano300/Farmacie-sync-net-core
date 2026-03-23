@@ -9,6 +9,7 @@ namespace HeronIntegration.Shared.Enums
     public enum ProcessType
     {
         Batch,
-        Farmadati
+        Farmadati,
+        Singoli
     }
 }

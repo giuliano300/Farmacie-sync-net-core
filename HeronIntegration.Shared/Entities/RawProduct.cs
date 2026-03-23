@@ -19,6 +19,7 @@ public class RawProduct
     public string? Category { get; set; }
 
     public string? SubCategory { get; set; }
+    public int? MagentoCategoryId { get; set; }
 
     public decimal Price { get; set; }
 

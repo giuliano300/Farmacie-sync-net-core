@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -48,6 +49,34 @@ public class CategoryMappingRepository : ICategoryMappingRepository
     public async Task CreateAsync(CategoryMapping category)
     {
         await _context.CategoryMappings.InsertOneAsync(category);
+    }
+
+    public async Task CreateMultipleAsync(string customerId, List<CategoryMappingDto> category)
+    {
+        await _context.CategoryMappings.DeleteManyAsync(x => x.CustomerId == customerId);
+
+        var mappings = category.Select(x =>
+        {
+            var split = x.GestionaleKey.Split('|');
+
+            return new CategoryMapping
+            {
+                Id = $"{x.CustomerId}_{x.GestionaleKey}_{x.MagentoCategoryId}",
+
+                CustomerId = x.CustomerId,
+
+                SourceCategory = split[0],
+                SourceSubCategory = split.Length > 1 ? split[1] : "",
+
+                GestionaleKey = x.GestionaleKey,
+
+                MagentoCategoryId = x.MagentoCategoryId,
+                MagentoPath = x.MagentoPath
+            };
+        }).ToList();
+
+        await _context.CategoryMappings.InsertManyAsync(mappings);
+
     }
 
     public async Task UpdateAsync(string id, CategoryMapping category)

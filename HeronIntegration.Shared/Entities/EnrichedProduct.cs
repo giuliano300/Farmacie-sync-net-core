@@ -15,6 +15,7 @@ public class EnrichedProduct
     public string? Category { get; set; }
 
     public string? SubCategory { get; set; }
+    public int? MagentoCategoryId { get; set; }
 
     public string? Producer { get; set; }
 
@@ -52,6 +53,7 @@ public class EnrichedProduct
             Category = raw.Category,
             SubCategory = raw.SubCategory,
             Producer = raw.Producer,
+            MagentoCategoryId = raw.MagentoCategoryId,
 
             Images = new List<ProductImage>(),
 
@@ -82,6 +84,7 @@ public class EnrichedProduct
 
                 Category = raw.Category,
                 SubCategory = raw.SubCategory,
+                MagentoCategoryId = raw.MagentoCategoryId,
                 Producer = raw.Producer,
 
                 Images = cache.Images ?? new List<ProductImage>(),

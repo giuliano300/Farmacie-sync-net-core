@@ -8,11 +8,6 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
 {
     public interface ICategoryResolver
     {
-        Task<(string category, string subCategory)> ResolveAsync(
-            string customerId,
-            string sourceCategory,
-            string sourceSubCategory);
-        Task<Dictionary<(string, string), (string, string)>> LoadMappingsAsync(
-            string customerId);
+        Task<Dictionary<string, int>> LoadMappingsAsync(string customerId);
     }
 }

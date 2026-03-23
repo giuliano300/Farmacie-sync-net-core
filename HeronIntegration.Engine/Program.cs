@@ -128,6 +128,9 @@ builder.Services.AddScoped<ICleanupService, CleanupService>();
 builder.Services.AddScoped<CategoryMappingRepository>();
 builder.Services.AddScoped<ProducerMappingRepository>();
 
+builder.Services.AddScoped<ICustomerMagentoCategoriesRepository, CustomerMagentoCategoriesRepository>();
+builder.Services.AddScoped<ICustomerManagementCategoriesRepository, CustomerManagementCategoriesRepository>();
+
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IMagentoExporterFactory, MagentoExporterFactory>();

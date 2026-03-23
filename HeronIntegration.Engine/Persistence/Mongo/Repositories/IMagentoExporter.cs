@@ -32,4 +32,11 @@ public interface IMagentoExporter
 
     int? ResolveCategoryId(Dictionary<string, int> categoryMap, string categoryName, CancellationToken token);
 
+    Task<List<CategoryNode>> GetCategoryAsync(CancellationToken token);
+
+    List<CustomerMagentoCategories> FlattenCategoriesNodes(
+    List<CategoryNode> nodes,
+    string customerId,
+    string parentPath = "");
+
 }

@@ -9,29 +9,13 @@ public class CategoryResolver : ICategoryResolver
         _repo = repo;
     }
 
-    public async Task<(string category, string subCategory)> ResolveAsync(
-        string customerId,
-        string sourceCategory,
-        string sourceSubCategory)
-    {
-        var mapping = await _repo.FindAsync(
-            customerId,
-            sourceCategory,
-            sourceSubCategory);
-
-        if (mapping == null)
-            return (sourceCategory, sourceSubCategory);
-
-        return (mapping.TargetCategory, mapping.TargetSubCategory);
-    }
-
-    public async Task<Dictionary<(string, string), (string, string)>> LoadMappingsAsync(string customerId)
+    public async Task<Dictionary<string, int>> LoadMappingsAsync(string customerId)
     {
         var mappings = await _repo.GetByCustomerAsync(customerId);
 
         return mappings!.ToDictionary(
-            x => (x.SourceCategory, x.SourceSubCategory),
-            x => (x.TargetCategory, x.TargetSubCategory)
+            x => x.GestionaleKey,
+            x => x.MagentoCategoryId
         );
     }
 }

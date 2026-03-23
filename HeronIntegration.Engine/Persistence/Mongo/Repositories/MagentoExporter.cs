@@ -678,6 +678,35 @@ public class MagentoExporter : IMagentoExporter
         return map;
     }
 
+    public async Task<List<CategoryNode>> GetCategoryAsync(CancellationToken token)
+    {
+        var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{BaseUrl}/rest/V1/categories"
+        );
+
+        var response = await _http.SendAsync(request, token);
+        var json = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(json);
+
+        // parse json
+        using var doc = JsonDocument.Parse(json);
+
+        // prendi children_data
+        if (!doc.RootElement.TryGetProperty("children_data", out var children))
+            throw new Exception("children_data non trovato");
+
+        // deserializza CORRETTAMENTE
+        var nodes = JsonSerializer.Deserialize<List<CategoryNode>>(
+            children.GetRawText(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+        );
+
+        return nodes ?? new List<CategoryNode>();
+    }
+
     // =====================================================
     // 🔹 RECURSIVE FLATTEN
     // =====================================================
@@ -1058,5 +1087,62 @@ public class MagentoExporter : IMagentoExporter
             }, token));
 
         await Task.WhenAll(workers.Prepend(producer));
+    }
+
+    public List<CustomerMagentoCategories> FlattenCategoriesNodes(
+    List<CategoryNode> nodes,
+    string customerId,
+    string parentPath = "")
+    {
+        var result = new List<CustomerMagentoCategories>();
+
+        if (nodes == null || !nodes.Any())
+            return result;
+
+        foreach (var node in nodes)
+        {
+            // pulizia nome (IMPORTANTISSIMO)
+            var cleanName = CleanCategoryName(node.Name);
+
+            // costruzione path
+            var path = string.IsNullOrEmpty(parentPath)
+                ? cleanName
+                : $"{parentPath} > {cleanName}";
+
+            // 👉 filtro livelli inutili (consigliato)
+            if (node.Level <= 4)
+            {
+                result.Add(new CustomerMagentoCategories
+                {
+                    Id = $"{customerId}_{node.Id}",
+                    CustomerId = customerId,
+                    MagentoCategoryId = node.Id,
+                    ParentId = node.ParentId,
+                    Name = cleanName,
+                    Path = path,
+                    Level = node.Level,
+                    Position = node.Position,
+                    IsActive = node.IsActive,
+                    ProductCount = node.ProductCount
+                });
+            }
+
+            // ricorsione sui figli
+            if (node.ChildrenData != null && node.ChildrenData.Any())
+            {
+                var children = FlattenCategoriesNodes(node.ChildrenData, customerId, path);
+                result.AddRange(children);
+            }
+        }
+
+        return result;
+    }
+
+    public string CleanCategoryName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return name;
+
+        return name.Split('|')[0].Trim();
     }
 }
