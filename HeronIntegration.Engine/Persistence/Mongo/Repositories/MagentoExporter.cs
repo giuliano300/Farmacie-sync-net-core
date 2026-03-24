@@ -528,12 +528,12 @@ public class MagentoExporter : IMagentoExporter
 
         var categoryLinks = new List<object>();
 
-        if (!string.IsNullOrWhiteSpace(p.SubCategory))
+        if (p.MagentoCategoryId != null)
         {
             categoryLinks.Add(new
             {
                 position = 0,
-                category_id = p.SubCategory
+                category_id = p.MagentoCategoryId
             });
         }
         return new
@@ -571,12 +571,12 @@ public class MagentoExporter : IMagentoExporter
     {
         var categoryLinks = new List<object>();
 
-        if (!string.IsNullOrWhiteSpace(p.SubCategory))
+        if (p.MagentoCategoryId != null)
         {
             categoryLinks.Add(new
             {
                 position = 0,
-                category_id = p.SubCategory
+                category_id = p.MagentoCategoryId
             });
         }
 
@@ -772,7 +772,6 @@ public class MagentoExporter : IMagentoExporter
         }
     }
 
-
     public async Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(string batchId, CancellationToken token)
     {
         var result = new List<MagentoSlimProduct>();
@@ -939,7 +938,6 @@ public class MagentoExporter : IMagentoExporter
             throw new Exception(body);
         }
     }
-
 
     private async Task DeleteExistingImagesAsync(string sku, CancellationToken token)
     {

@@ -116,6 +116,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             Name = p.Name,
             Price = p.Price,
             Availability = p.Availability,
+            MagentoCategoryId = p.MagentoCategoryId,
             LongDescription = p.LongDescription?.Trim(),
             ShortDescription = p.ShortDescription?.Trim(),
             SupplierCode = p.SupplierCode,
@@ -156,7 +157,8 @@ public class MagentoExportStepProcessor : IStepProcessor
                             metadata.manufacturers!.TryGetValue(p.Producer, out var manufacturerId))
                                     ? manufacturerId.ToString()
                                     : "0",
-                SubCategory = p.MagentoCategoryId == null ? null : p.MagentoCategoryId.ToString(),
+                SubCategory = p.SubCategory,
+                MagentoCategoryId = p.MagentoCategoryId,
                 Images = p.Images
             };
         }).ToList();

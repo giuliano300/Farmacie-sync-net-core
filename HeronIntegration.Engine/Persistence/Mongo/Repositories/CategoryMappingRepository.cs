@@ -53,8 +53,6 @@ public class CategoryMappingRepository : ICategoryMappingRepository
 
     public async Task CreateMultipleAsync(string customerId, List<CategoryMappingDto> category)
     {
-        await _context.CategoryMappings.DeleteManyAsync(x => x.CustomerId == customerId);
-
         var mappings = category.Select(x =>
         {
             var split = x.GestionaleKey.Split('|');

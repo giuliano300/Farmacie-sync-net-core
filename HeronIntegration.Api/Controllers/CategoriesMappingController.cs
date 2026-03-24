@@ -77,68 +77,75 @@ public class CategoryMappingsController : ControllerBase
     [HttpGet("SetMagentoManagementCategories")]
     public async Task<IActionResult> SetMagentoManagementCategories(string customerId)
     {
-        var customer = await _customerRepo.GetByIdAsync(customerId);
+        try
+        {
+            var customer = await _customerRepo.GetByIdAsync(customerId);
 
-        if (customer?.Magento == null)
-            throw new Exception("Magento config mancante");
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
 
-        var exporter = _magentoExporterFactory.Create(customer.Magento);
-        var token = _processManager.Start(ProcessType.Singoli, "");
+            var exporter = _magentoExporterFactory.Create(customer.Magento);
+            var token = _processManager.Start(ProcessType.Singoli, "");
 
-        //Import Magento-->Mongo
-        var nodes = await exporter.GetCategoryAsync(token);
-        var categories = exporter.FlattenCategoriesNodes(nodes, customerId);
-        await _customeMagentoRepo.CreateAsync(customerId, categories);
+            //Import Magento-->Mongo
+            var nodes = await exporter.GetCategoryAsync(token);
+            var categories = exporter.FlattenCategoriesNodes(nodes, customerId);
+            await _customeMagentoRepo.CreateAsync(customerId, categories);
 
-        //Import Heron-->Mongo
-        var root = _env.ContentRootPath;
-        var parent = Directory.GetParent(root)!.FullName;
+            //Import Heron-->Mongo
+            var root = _env.ContentRootPath;
+            var parent = Directory.GetParent(root)!.FullName;
 
-        var folder = Path.Combine(
-            parent,
-            "HeronFolder",
-            customer.HeronFolder
-        );
-        if (!Directory.Exists(folder))
-            return StatusCode(500, new
-            {
-                error = "Folder non trovato : " + folder
-            });
-
-        var pathFile = Directory.GetFiles(folder).FirstOrDefault();
-        if (pathFile == null)
-            return StatusCode(500, new
-            {
-                error = "Path file non trovato : " + pathFile
-            });
-
-        var prodotti = _parser.Parse(pathFile, customerId);
-
-        var categoriesHeron = prodotti
-            .Where(p => !string.IsNullOrWhiteSpace(p.Category))
-            .Select(p =>
-            {
-                var categoria = p.Category.Trim();
-                var sotto = p.SubCategory?.Trim() ?? "";
-
-                var key = $"{categoria}|{sotto}";
-
-                return new CustomerManagementCategories
+            var folder = Path.Combine(
+                parent,
+                "HeronFolder",
+                customer.HeronFolder
+            );
+            if (!Directory.Exists(folder))
+                return StatusCode(500, new
                 {
-                    Id = $"{customerId}_{key}",
-                    CustomerId = customerId,
-                    Category = categoria,
-                    SubCategory = sotto,
-                    Key = key
-                };
-            })
-            .GroupBy(x => x.Key)
-            .Select(g => g.First())
-            .ToList();
+                    error = "Folder non trovato : " + folder
+                });
 
-        await _customerManagementRepo.CreateAsync(customerId, categoriesHeron);
+            var pathFile = Directory.GetFiles(folder).FirstOrDefault();
+            if (pathFile == null)
+                return StatusCode(500, new
+                {
+                    error = "Path file non trovato : " + pathFile
+                });
 
-        return Ok(categories);
+            var prodotti = _parser.Parse(pathFile, customerId);
+
+            var categoriesHeron = prodotti
+                .Where(p => !string.IsNullOrWhiteSpace(p.Category))
+                .Select(p =>
+                {
+                    var categoria = p.Category.Trim();
+                    var sotto = p.SubCategory?.Trim() ?? "";
+
+                    var key = $"{categoria}|{sotto}";
+
+                    return new CustomerManagementCategories
+                    {
+                        Id = $"{customerId}_{key}",
+                        CustomerId = customerId,
+                        Category = categoria,
+                        SubCategory = sotto,
+                        Key = key
+                    };
+                })
+                .GroupBy(x => x.Key)
+                .Select(g => g.First())
+                .ToList();
+
+            await _customerManagementRepo.CreateAsync(customerId, categoriesHeron);
+
+            return Ok(categories);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPost]
@@ -152,8 +159,9 @@ public class CategoryMappingsController : ControllerBase
     [Route("SetMultipleMapping")]
     public async Task<IActionResult> Create([FromQuery] string customerId, [FromBody] List<CategoryMappingDto> categories)
     {
-        await _repo.CreateMultipleAsync(customerId, categories);
-        return Ok(categories);
+            await _repo.CreateMultipleAsync(customerId, categories);
+            return Ok(categories);
+
     }
 
     [HttpPut("{id}")]
