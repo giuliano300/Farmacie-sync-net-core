@@ -131,6 +131,9 @@ builder.Services.AddScoped<ProducerMappingRepository>();
 builder.Services.AddScoped<ICustomerMagentoCategoriesRepository, CustomerMagentoCategoriesRepository>();
 builder.Services.AddScoped<ICustomerManagementCategoriesRepository, CustomerManagementCategoriesRepository>();
 
+builder.Services.AddScoped<ICustomerMagentoProducerRepository, CustomerMagentoProducerRepository>();
+builder.Services.AddScoped<ICustomerManagementProducerRepository, CustomerManagementProducerRepository>();
+
 
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IMagentoExporterFactory, MagentoExporterFactory>();

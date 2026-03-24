@@ -39,4 +39,6 @@ public interface IMagentoExporter
     string customerId,
     string parentPath = "");
 
+    Task<List<MagentoAttributeOption>> GetAttributeManufacturerAsync(CancellationToken token);
+
 }

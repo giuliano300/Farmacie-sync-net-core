@@ -67,4 +67,10 @@ public class MongoContext
     public IMongoCollection<CustomerManagementCategories> CustomerManagementCategories =>
     _database.GetCollection<CustomerManagementCategories>("customer_management_categories");
 
+    public IMongoCollection<CustomerMagentoProducer> CustomerMagentoProducer =>
+    _database.GetCollection<CustomerMagentoProducer>("customer_magento_producer");
+
+    public IMongoCollection<CustomerManagementProducer> CustomerManagementProducer =>
+    _database.GetCollection<CustomerManagementProducer>("customer_management_producer");
+
 }

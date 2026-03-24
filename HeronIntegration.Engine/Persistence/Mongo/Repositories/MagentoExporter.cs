@@ -651,6 +651,24 @@ public class MagentoExporter : IMagentoExporter
             );
     }
 
+    public async Task<List<MagentoAttributeOption>> GetAttributeManufacturerAsync(CancellationToken token)
+    {
+        var url = $"{BaseUrl}/rest/V1/products/attributes/manufacturer/options";
+
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        var response = await _http.SendAsync(request, token);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new Exception(body);
+
+        var options = JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        return options!;
+    }
+
     // =====================================================
     // 🔹 GET CATEGORY MAP (FLATTEN TREE)
     // =====================================================
