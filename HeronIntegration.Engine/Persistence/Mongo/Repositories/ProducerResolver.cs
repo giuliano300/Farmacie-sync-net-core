@@ -18,7 +18,7 @@ public class ProducerResolver : IProducerResolver
     {
         var mapping = await _repo.FindAsync(customerId, sourceProducer);
 
-        return mapping?.TargetProducer ?? sourceProducer;
+        return mapping?.ManagementLabel ?? sourceProducer;
     }
 
     public async Task<Dictionary<string, string>> LoadMappingsAsync(string customerId)
@@ -26,8 +26,8 @@ public class ProducerResolver : IProducerResolver
         var mappings = await _repo.GetByCustomerAsync(customerId);
 
         return mappings!.ToDictionary(
-            x => x.SourceProducer,
-            x => x.TargetProducer
+            x => x.ManagementLabel,
+            x => x.MagentoLabel
         );
     }
 }

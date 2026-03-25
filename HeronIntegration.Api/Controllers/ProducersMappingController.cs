@@ -23,6 +23,7 @@ public class ProducerMappingsController : ControllerBase
 
     public ProducerMappingsController(ProducerMappingRepository repo,
         IMagentoExporterFactory magentoExporterFactory,
+        ICustomerRepository customerRep,
         ICustomerMagentoProducerRepository customeMagentoRepo,
         ICustomerManagementProducerRepository customerManagementRepo, 
         IHostEnvironment env,
@@ -37,6 +38,8 @@ public class ProducerMappingsController : ControllerBase
         _env = env;
         _parser = parser;
         _customerManagementRepo = customerManagementRepo;
+        _customerRepo = customerRep;
+        _processManager = processManager;
     }
 
     [HttpGet]
@@ -71,12 +74,37 @@ public class ProducerMappingsController : ControllerBase
         return Ok();
     }
 
+    [HttpGet("GetMagentoProducer")]
+    public async Task<IActionResult> GetMagentoProducer(string customerId)
+    {
+        var list = await _customeMagentoRepo.GetByCustomerAsync(customerId);
+        return Ok(list);
+    }
+
+    [HttpGet("GetManagementProducer")]
+    public async Task<IActionResult> GetManagementProducer(string customerId)
+    {
+        var list = await _customerManagementRepo.GetByCustomerAsync(customerId);
+        return Ok(list);
+    }
+
+
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(string id)
     {
         await _repo.DeleteAsync(id);
         return Ok();
     }
+
+    [HttpPost]
+    [Route("SetMultipleMapping")]
+    public async Task<IActionResult> Create([FromQuery] string customerId, [FromBody] List<ProducerMappingDto> p)
+    {
+        await _repo.CreateMultipleAsync(customerId, p);
+        return Ok(p);
+
+    }
+
 
     [HttpGet("SetMagentoManagementProducer")]
     public async Task<IActionResult> SetMagentoManagementProducer(string customerId)
@@ -93,7 +121,7 @@ public class ProducerMappingsController : ControllerBase
 
             //Import Magento-->Mongo
             var nodes = await exporter.GetAttributeManufacturerAsync(token);
-            var producers = nodes.Select(o => new CustomerMagentoProducer
+            var producers = nodes.Where(a => a.value != "" && a.value != null).Select(o => new CustomerMagentoProducer
             {
                 Id = $"{customerId}_{o.value}",
                 CustomerId = customerId,
@@ -128,31 +156,28 @@ public class ProducerMappingsController : ControllerBase
 
             var prodotti = _parser.Parse(pathFile, customerId);
 
-            var categoriesHeron = prodotti
-                .Where(p => !string.IsNullOrWhiteSpace(p.Category))
+            var producerHeron = prodotti
+                .Where(p => !string.IsNullOrWhiteSpace(p.Producer))
                 .Select(p =>
                 {
-                    var categoria = p.Category.Trim();
-                    var sotto = p.SubCategory?.Trim() ?? "";
+                    var producer = p.Producer.Trim();
 
-                    var key = $"{categoria}|{sotto}";
+                    var key = $"{producer}";
 
-                    return new CustomerManagementCategories
+                    return new CustomerManagementProducer
                     {
                         Id = $"{customerId}_{key}",
                         CustomerId = customerId,
-                        Category = categoria,
-                        SubCategory = sotto,
-                        Key = key
+                        Producer = producer
                     };
                 })
-                .GroupBy(x => x.Key)
+                .GroupBy(x => x.Producer)
                 .Select(g => g.First())
                 .ToList();
 
-            await _customerManagementRepo.CreateAsync(customerId, categoriesHeron);
+            await _customerManagementRepo.CreateAsync(customerId, producerHeron);
 
-            return Ok(categories);
+            return Ok(prodotti);
         }
         catch (Exception ex)
         {

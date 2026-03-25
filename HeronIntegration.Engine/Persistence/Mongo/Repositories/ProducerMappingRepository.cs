@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -14,17 +15,36 @@ public class ProducerMappingRepository : IProducerMappingRepository
     }
 
     public async Task<ProducerMapping?> FindAsync(
-        string customerId,
-        string sourceProducer)
+    string customerId,
+    string sourceProducer)
     {
         var filter = Builders<ProducerMapping>.Filter.And(
             Builders<ProducerMapping>.Filter.Eq(x => x.CustomerId, customerId),
-            Builders<ProducerMapping>.Filter.Eq(x => x.SourceProducer, sourceProducer)
+            Builders<ProducerMapping>.Filter.Eq(x => x.ManagementLabel, sourceProducer)
         );
 
         return await _context.ProducerMappings
             .Find(filter)
             .FirstOrDefaultAsync();
+    }
+
+    public async Task CreateMultipleAsync(string customerId, List<ProducerMappingDto> p)
+    {
+        var mappings = p.Select(x =>
+        {
+            return new ProducerMapping
+            {
+                Id = $"{x.CustomerId}_{x.MagentoValue}_{x.ManagementKey}",
+
+                CustomerId = x.CustomerId,
+                ManagementKey = x.ManagementKey,
+                MagentoValue = x.MagentoValue,
+                MagentoLabel = x.MagentoLabel,
+                ManagementLabel = x.ManagementLabel 
+            };
+        }).ToList();
+
+        await _context.ProducerMappings.InsertManyAsync(mappings);
     }
 
     public async Task<List<ProducerMapping>> GetByCustomerAsync(string customerId)
