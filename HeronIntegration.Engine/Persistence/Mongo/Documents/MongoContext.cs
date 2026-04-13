@@ -73,4 +73,7 @@ public class MongoContext
     public IMongoCollection<CustomerManagementProducer> CustomerManagementProducer =>
     _database.GetCollection<CustomerManagementProducer>("customer_management_producer");
 
+    public IMongoCollection<ProductToExclude> ProductToExclude =>
+    _database.GetCollection<ProductToExclude>("product_to_exclude");
+
 }

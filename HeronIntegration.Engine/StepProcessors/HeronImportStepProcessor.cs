@@ -21,6 +21,7 @@ public class HeronImportStepProcessor : IStepProcessor
     private readonly IProducerResolver _producerResolver;
     private readonly IStepRepository _stepRepo;
     private readonly ICleanupService _cleanupService;
+    private readonly IProductToExcludeRepository _productToExcludeRepository;
 
     public HeronImportStepProcessor(
         IBatchRepository batchRepo,
@@ -30,7 +31,8 @@ public class HeronImportStepProcessor : IStepProcessor
         ICategoryResolver categoryResolver,
         IProducerResolver producerResolver,
         IStepRepository stepRepo,
-        ICleanupService cleanupService)
+        ICleanupService cleanupService,
+        IProductToExcludeRepository productToExcludeRepository)
     {
         _batchRepo = batchRepo;
         _rawRepo = rawRepo;
@@ -40,6 +42,7 @@ public class HeronImportStepProcessor : IStepProcessor
         _producerResolver = producerResolver;
         _stepRepo = stepRepo;
         _cleanupService = cleanupService;
+        _productToExcludeRepository = productToExcludeRepository;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
@@ -75,8 +78,14 @@ public class HeronImportStepProcessor : IStepProcessor
             var categoryMap = await _categoryResolver.LoadMappingsAsync(batch.CustomerId);
             var producerMap = await _producerResolver.LoadMappingsAsync(batch.CustomerId);
 
+            var productToExclude = (await _productToExcludeRepository.GetByCustomerAsync(batch.CustomerId)).Select(a => a.Aic);
+
             foreach (var p in parsed)
             {
+                //NON AGGIUNGE PRODOTTI NON VENDIBILI
+                if (productToExclude.Contains(p.Aic))
+                    continue;
+
                 var key = $"{p.Category}|{p.SubCategory}";
 
                 int? magentoCategoryId = null;

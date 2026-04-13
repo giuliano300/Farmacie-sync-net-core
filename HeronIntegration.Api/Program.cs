@@ -136,6 +136,7 @@ builder.Services.AddScoped<ICustomerManagementCategoriesRepository, CustomerMana
 builder.Services.AddScoped<ICustomerMagentoProducerRepository, CustomerMagentoProducerRepository>();
 builder.Services.AddScoped<ICustomerManagementProducerRepository, CustomerManagementProducerRepository>();
 
+builder.Services.AddScoped<IProductToExcludeRepository, ProductToExcludeRepository>();
 
 builder.Services.AddScoped<ISupplierStockProcessor, SupplierStockProcessor>();
 
