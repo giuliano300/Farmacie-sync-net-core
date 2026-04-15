@@ -24,21 +24,29 @@ public class DashboardController : ControllerBase
     [HttpGet("")]
     public async Task<DashboardResponse> GetDashboard()
     {
-        var todayBatches = await _batchRepo.GetTodayAsync();
-
-        var result = new DashboardResponse();
-
-        foreach (var batch in todayBatches)
+        try
         {
-            var item = await _batchRepo.BuildBatchDashboard(batch);
+            var todayBatches = await _batchRepo.GetTodayAsync();
 
-            if (batch.Status == BatchStatus.Running)
-                result.ActiveBatches.Add(item);
-            else
-                result.CompletedBatches.Add(item);
+            var result = new DashboardResponse();
+
+            foreach (var batch in todayBatches)
+            {
+                var item = await _batchRepo.BuildBatchDashboard(batch);
+
+                if (batch.Status == BatchStatus.Running)
+                    result.ActiveBatches.Add(item);
+                else
+                    result.CompletedBatches.Add(item);
+            }
+
+            return result;
+
         }
-
-        return result;
+        catch(Exception e)
+        {
+            return new DashboardResponse();
+        }
     }
 
 }

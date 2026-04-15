@@ -44,8 +44,15 @@ namespace HeronIntegration.Shared.Models
         public int UpdatePrice { get; set; }
         public int Success { get; set; }
         public int Errors { get; set; }
-        public int? totalMagentoProducts { get; set; } = default!;
-        public int? totalDownloadMagentoProducts { get; set; } = default!;
+        public int? totalMagentoProducts { get; set; }
+        public int? totalDownloadMagentoProducts { get; set; }
+
+        private double SafeDivide(double a, double b)
+        {
+            if (b == 0) return 0;
+            var result = a / b;
+            return double.IsFinite(result) ? result : 0;
+        }
 
         public double ProgressDownload
         {
@@ -63,19 +70,20 @@ namespace HeronIntegration.Shared.Models
                 if (total == 0)
                     return 0;
 
-                return Math.Round((double)downloaded / total * 100, 2);
+                return Math.Round(SafeDivide(downloaded, total) * 100, 2);
             }
         }
 
         public double ProgressInsert =>
-        Total == 0 ? 0 : Math.Round((double)(Insert + UpdatePrice + Success) / (double)Total! * 100, 2);
+            Math.Round(SafeDivide(Insert + UpdatePrice + Success, Total) * 100, 2);
+
         public double ProgressUpdatePrice =>
-        totalMagentoProducts == null ? 0 : Math.Round((double)(UpdatePrice + Success) / (double)totalMagentoProducts! * 100, 2);
+            Math.Round(SafeDivide(UpdatePrice + Success, totalMagentoProducts ?? 0) * 100, 2);
+
         public double ProgressInsertImages =>
-        totalMagentoProducts == null ? 0 : Math.Round((double)(InsertImages) / (double)totalMagentoProducts! * 100, 2);
+            Math.Round(SafeDivide(InsertImages, totalMagentoProducts ?? 0) * 100, 2);
+
         public double Progress =>
-        totalMagentoProducts == null ? 0 : Math.Round((double)Success / (double)totalMagentoProducts! * 100, 2);
+            Math.Round(SafeDivide(Success, totalMagentoProducts ?? 0) * 100, 2);
     }
-
-
 }
