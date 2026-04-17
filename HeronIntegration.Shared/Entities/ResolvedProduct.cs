@@ -30,6 +30,7 @@ public class ResolvedProduct
     public string? Atc { get; set; }
     public string? Source { get; set; }
     public decimal Price { get; set; }
+    public decimal OriginalPrice { get; set; }
     public int Availability { get; set; }
 
     public string? SupplierCode { get; set; }
@@ -60,6 +61,7 @@ public class ResolvedProduct
             Atc = raw.Atc,
             Source = raw.Source,
             Price = chosen.Price,
+            OriginalPrice = raw.OriginalPrice,
             Availability = chosen.Availability,
             SupplierCode = chosen.SupplierCode,
             Images = raw.Images,

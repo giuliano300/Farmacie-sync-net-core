@@ -30,6 +30,7 @@ public class EnrichedProduct
     public string? Atc { get; set; }
     public string? Source { get; set; }
     public decimal HeronPrice { get; set; }
+    public decimal OriginalPrice { get; set; }
     public int HeronStock { get; set; }
 
 
@@ -60,6 +61,8 @@ public class EnrichedProduct
             HeronPrice = raw.Price,
             HeronStock = raw.Stock,
 
+            OriginalPrice = raw.OriginalPrice,
+
             CachedAt = DateTime.UtcNow,
 
             CreatedAt = DateTime.UtcNow
@@ -89,6 +92,7 @@ public class EnrichedProduct
 
                 Images = cache.Images ?? new List<ProductImage>(),
                 HeronPrice = raw.Price,
+                OriginalPrice = raw.OriginalPrice,
                 HeronStock = raw.Stock,
                 CreatedAt = DateTime.UtcNow,
                 Source = "CACHE"

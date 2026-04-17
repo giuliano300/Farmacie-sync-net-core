@@ -122,7 +122,7 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
         var pathFile = Directory.GetFiles(folder).FirstOrDefault();
         if (pathFile == null) return;
 
-        var parsed = _parser.Parse(pathFile, customer.Id).ToList();
+        var parsed =  _parser.Parse(pathFile, customer.Id).ToList();
 
         var cacheList = await _farmadatiCacheRepo.GetByAicsAsync(parsed.Select(x => x.Aic));
         var cacheAics = cacheList.Select(x => x.Aic).ToHashSet();

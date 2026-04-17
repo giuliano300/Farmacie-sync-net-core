@@ -1,11 +1,12 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using FluentFTP;
+using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
-using Renci.SshNet.Security;
+using System.IO.Compression;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
@@ -22,6 +23,7 @@ public class HeronImportStepProcessor : IStepProcessor
     private readonly IStepRepository _stepRepo;
     private readonly ICleanupService _cleanupService;
     private readonly IProductToExcludeRepository _productToExcludeRepository;
+    private readonly ICustomerRepository _customerRepo;
 
     public HeronImportStepProcessor(
         IBatchRepository batchRepo,
@@ -32,7 +34,8 @@ public class HeronImportStepProcessor : IStepProcessor
         IProducerResolver producerResolver,
         IStepRepository stepRepo,
         ICleanupService cleanupService,
-        IProductToExcludeRepository productToExcludeRepository)
+        IProductToExcludeRepository productToExcludeRepository,
+        ICustomerRepository customerRepo)
     {
         _batchRepo = batchRepo;
         _rawRepo = rawRepo;
@@ -43,6 +46,7 @@ public class HeronImportStepProcessor : IStepProcessor
         _stepRepo = stepRepo;
         _cleanupService = cleanupService;
         _productToExcludeRepository = productToExcludeRepository;
+        _customerRepo = customerRepo;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
@@ -70,7 +74,60 @@ public class HeronImportStepProcessor : IStepProcessor
             if (batch == null)
                 throw new Exception($"Batch {batchId} non trovato");
 
-            var parsed = _parser.Parse(batch.HeronFilePath!, batch.CustomerId);
+            var customer = await _customerRepo.GetByIdAsync(batch.CustomerId);
+            if (customer == null)
+                throw new Exception($"Customer {batch.CustomerId} non trovato");
+
+            //SCARICA L'ULTIMO FILE DA HERON
+            var ftp = new FtpClient(customer.HeronFtp, customer.HeronUsername, customer.HeronPassword);
+
+            ftp.Connect();
+
+            // 👉 prendi il più recente
+            var files = ftp.GetListing(customer.HeronFtpFolder);
+
+            var latestZip = files
+                .Where(x => x.Type == FtpObjectType.File &&
+                            x.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(x => x.Modified)
+                .FirstOrDefault();
+
+            if (latestZip != null)
+            {
+
+                var destinationPath = Path.GetDirectoryName(batch.HeronFilePath!);
+                var fileName = Path.GetFileName(batch.HeronFilePath!);
+
+                // assicura che la cartella esista
+                if (Directory.Exists(destinationPath))
+                {
+                    Directory.Delete(destinationPath, true);
+                }
+
+                Directory.CreateDirectory(destinationPath!);
+
+                using var ms = new MemoryStream();
+
+                ftp.DownloadStream(ms, latestZip.FullName);
+                ms.Position = 0;
+
+                using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
+
+                // prende il file XML dentro lo zip
+                var entry = archive.Entries
+                    .First(e => !string.IsNullOrEmpty(e.Name) && e.Name.EndsWith(".xml"));
+
+                var destinationFile = Path.Combine(destinationPath!, fileName);
+
+                // scrittura file
+                using var entryStream = entry.Open();
+                using var fileStream = new FileStream(destinationFile, FileMode.Create, FileAccess.Write);
+
+                entryStream.CopyTo(fileStream);
+            }
+            //////////////////////////
+
+            var parsed = _parser.Parse(batch.HeronFilePath!, batch.CustomerId).ToList();
 
             var rawProducts = new List<RawProduct>();
             var exportRows = new List<ExportExecution>();
@@ -108,6 +165,7 @@ public class HeronImportStepProcessor : IStepProcessor
                     Aic = p.Aic,
                     Name = p.Name,
                     Price = p.Price,
+                    OriginalPrice = p.OriginalPrice,
                     Stock = p.Stock,
                     CreatedAt = DateTime.UtcNow,
                     MagentoCategoryId = magentoCategoryId,

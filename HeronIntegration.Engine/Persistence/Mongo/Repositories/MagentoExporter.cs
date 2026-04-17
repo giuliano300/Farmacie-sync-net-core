@@ -7,6 +7,7 @@ using MongoDB.Bson.IO;
 using Renci.SshNet;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -88,13 +89,25 @@ public class MagentoExporter : IMagentoExporter
 
             //INVIO UNO PER UNO
             if (!c.Msi)
-                await ProcessChannelAsync(
-                 products,
-                 async (p, ct) =>
-                 {
-                     await UpsertProductAsync(p, batchId, ct);
-                 },
-                 token);
+            {
+                var semaphore = new SemaphoreSlim(5); // max 5 richieste parallele
+
+                var tasks = products.Select(async p =>
+                {
+                    await semaphore.WaitAsync(token);
+                    try
+                    {
+                        await UpsertProductAsync(p, batchId, token);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+            }
+
             else
                 //INVIO BULK
                 await UpsertProductBulkAsync(l, batchId, token);
@@ -536,35 +549,55 @@ public class MagentoExporter : IMagentoExporter
                 category_id = p.MagentoCategoryId
             });
         }
-        return new
+
+        var customAttributes = new List<object>
         {
-            sku = p.Aic,
-            name = p.Name,
-            attribute_set_id = 4,
-            price = p.Price,
-            status = 1,
-            visibility = 4,
-            type_id = "simple",
-            weight = 1,
-            custom_attributes = new[]
-            {
-                new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
-                new { attribute_code = "short_description", value = p.ShortDescription },
-                new { attribute_code = "supplier", value = p.SupplierCode },
-                new { attribute_code = "manufacturer", value = p.Producer },
-                new { attribute_code = "url_key", value = BuildUrlKey(p.Name, p.Aic) }
-            },
-            extension_attributes = new
-            {
-                website_ids = new[] { 1 },
-                stock_item = new
-                {
-                    qty = p.Availability,
-                    is_in_stock = p.Availability > 0
-                },
-                category_links = categoryLinks
-            }
+            new { attribute_code = "description", value = p.LongDescription ?? p.ShortDescription },
+            new { attribute_code = "short_description", value = p.ShortDescription },
+            new { attribute_code = "supplier", value = p.SupplierCode },
+            new { attribute_code = "manufacturer", value = p.Producer },
+            new { attribute_code = "url_key", value = BuildUrlKey(p.Name, p.Aic) }
         };
+
+        // 👉 AGGIUNTA PREZZO SCONTATO
+        if (p.OriginalPrice > p.Price)
+        {
+            customAttributes.Add(new
+            {
+                attribute_code = "special_price",
+                value = p.Price
+            });
+
+            // opzionale
+            customAttributes.Add(new
+            {
+                attribute_code = "special_from_date",
+                value = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+            });
+        }
+
+        return new
+            {
+                sku = p.Aic,
+                name = p.Name,
+                attribute_set_id = 4,
+                price = p.OriginalPrice == 0 ? p.Price : p.OriginalPrice,
+                status = 1,
+                visibility = 4,
+                type_id = "simple",
+                weight = 1,
+                custom_attributes = customAttributes,
+                extension_attributes = new
+                {
+                    website_ids = new[] { 1 },
+                    stock_item = new
+                    {
+                        qty = p.Availability,
+                        is_in_stock = p.Availability > 0
+                    },
+                    category_links = categoryLinks
+                }
+            };
     }
 
     public object BuildMagentoMsiProductWithoutImages(ResolvedProduct p)
@@ -1056,7 +1089,7 @@ public class MagentoExporter : IMagentoExporter
                 {
                     var matchNoCat = categoryMap
                         .FirstOrDefault(x =>
-                            x.Key.EndsWith("/da smistare", StringComparison.OrdinalIgnoreCase)
+                            x.Key.ToLower().EndsWith("smistare", StringComparison.OrdinalIgnoreCase)
                         );
                     if (matchNoCat.Equals(default(KeyValuePair<string, int>)))
                         return null;

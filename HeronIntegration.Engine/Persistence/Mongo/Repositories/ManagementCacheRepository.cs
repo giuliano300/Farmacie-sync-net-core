@@ -24,12 +24,26 @@ public class ManagementCacheRepository : IManagementCacheRepository
 
     public async Task InsertAsync(ManagementCache cache)
     {
-        await _context.ManagementCaches.InsertOneAsync(cache);
+        try
+        {
+            await _context.ManagementCaches.InsertOneAsync(cache);
+        }
+        catch (Exception e)
+        {
+
+        }
     }
 
     public async Task InsertManyAsync(IEnumerable<ManagementCache> cache)
     {
-        await _context.ManagementCaches.InsertManyAsync(cache);
+        try
+        {
+            await _context.ManagementCaches.InsertManyAsync(cache);
+        }
+        catch(Exception e)
+        {
+
+        }
     }
 
     public async Task<List<ManagementCache>> GetByAicsAsync(IEnumerable<string> aics)

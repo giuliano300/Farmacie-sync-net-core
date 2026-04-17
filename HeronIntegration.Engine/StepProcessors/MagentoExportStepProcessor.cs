@@ -74,7 +74,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                 .Select(x => x.Sku)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // 🔹 prendi SOLO quelli presenti in Magento
+            // 🔹 prendi SOLO quelli non presenti in Magento
             var mappedExisting = mapped
                 .Where(p => magentoSet.Contains(p.Aic))
                 .ToList();
@@ -115,6 +115,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             Aic = p.Aic,
             Name = p.Name,
             Price = p.Price,
+            OriginalPrice = p.OriginalPrice,
             Availability = p.Availability,
             MagentoCategoryId = p.MagentoCategoryId,
             LongDescription = p.LongDescription?.Trim(),
@@ -175,7 +176,14 @@ public class MagentoExportStepProcessor : IStepProcessor
             }
 
             if (NeedsUpdate(p, m, exporter, metadata))
+            {
+                if (p.MagentoCategoryId == null)
+                {
+                    var x = metadata!.categories!.FirstOrDefault(a => a.Key.ToLower().EndsWith("smistare"));
+                    p.MagentoCategoryId = x.Value;
+                }
                 toUpsert.Add(p);
+            }
             else
                 toSkip.Add(p);
         }

@@ -24,12 +24,26 @@ public class FarmadatiCacheRepository : IFarmadatiCacheRepository
 
     public async Task InsertAsync(FarmadatiCache cache)
     {
-        await _context.FarmadatiCaches.InsertOneAsync(cache);
+        try
+        {
+            await _context.FarmadatiCaches.InsertOneAsync(cache);
+        }
+        catch (Exception e)
+        {
+
+        }
     }
 
     public async Task InsertManyAsync(IEnumerable<FarmadatiCache> cache)
     {
-        await _context.FarmadatiCaches.InsertManyAsync(cache);
+        try
+        {
+            await _context.FarmadatiCaches.InsertManyAsync(cache);
+        }
+        catch(Exception e)
+        {
+
+        }
     }
 
 

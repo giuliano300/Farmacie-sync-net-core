@@ -156,11 +156,11 @@ public class ProducerMappingsController : ControllerBase
 
             var prodotti = _parser.Parse(pathFile, customerId);
 
-            var producerHeron = prodotti
+            var producerHeron =  prodotti
                 .Where(p => !string.IsNullOrWhiteSpace(p.Producer))
                 .Select(p =>
                 {
-                    var producer = p.Producer.Trim();
+                    var producer = p.Producer!.Trim();
 
                     var key = $"{producer}";
 
