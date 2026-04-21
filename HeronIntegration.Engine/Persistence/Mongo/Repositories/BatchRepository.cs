@@ -149,6 +149,16 @@ public class BatchRepository : IBatchRepository
         await _context.BatchExecutions.UpdateOneAsync(filter, update);
     }
 
+    public async Task UpdatProcessId(string batchId, int processId)
+    {
+        var filter = Builders<BatchExecution>.Filter.Eq(x => x.Id, ObjectId.Parse(batchId));
+
+        var update = Builders<BatchExecution>.Update
+            .Set(x => x.ProcessId, processId);
+
+        await _context.BatchExecutions.UpdateOneAsync(filter, update);
+    }
+
     public async Task<List<StepExecution>> GetByBatchAsync(string batchId)
     {
         return await _context.StepExecutions
@@ -266,6 +276,7 @@ public class BatchRepository : IBatchRepository
         // cancella il report
         await _context.BatchExecutions.DeleteOneAsync(x => x.Id == objectId);
     }
+
     public async Task<BatchDashboardItem> BuildBatchDashboard(BatchExecution batch)
     {
         var batchId = batch.Id.ToString();

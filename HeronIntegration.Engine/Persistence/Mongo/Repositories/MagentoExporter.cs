@@ -1,12 +1,17 @@
-﻿using HeronIntegration.Engine.External.Farmadati.Services;
+﻿using FluentFTP;
+using HeronIntegration.Engine.External.Farmadati.Services;
+using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using MongoDB.Bson.IO;
 using Renci.SshNet;
+using System.Globalization;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +25,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly IExportRepository _exportRepo;
     private readonly MagentoConfig _magento;
     private readonly IBatchRepository _batchRepo;
+    private readonly IHostEnvironment _env;
     private readonly ICustomerRepository _customerRepo;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
 
@@ -31,7 +37,8 @@ public class MagentoExporter : IMagentoExporter
         IExportRepository exportRepo,
         MagentoConfig magento,
         IBatchRepository batchRepo,
-        ICustomerRepository customerRepo)
+        ICustomerRepository customerRepo,
+        IHostEnvironment env)
     {
         _http = http;
         _imageStorage = imageStorage;
@@ -47,6 +54,7 @@ public class MagentoExporter : IMagentoExporter
 
         _http.DefaultRequestVersion = HttpVersion.Version20;
         _http.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+        _env = env;
     }
 
     // =====================================================
@@ -90,22 +98,14 @@ public class MagentoExporter : IMagentoExporter
             //INVIO UNO PER UNO
             if (!c.Msi)
             {
-                var semaphore = new SemaphoreSlim(5); // max 5 richieste parallele
-
-                var tasks = products.Select(async p =>
-                {
-                    await semaphore.WaitAsync(token);
-                    try
-                    {
-                        await UpsertProductAsync(p, batchId, token);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                });
-
-                await Task.WhenAll(tasks);
+                await ImportByCsvAsync(l, c, b, token);
+                //await ProcessChannelAsync(
+                //   l,
+                // async (item, ct) =>
+                // {
+                //await UpsertProductAsync(item, batchId, ct);
+                //},
+                //token);
             }
 
             else
@@ -116,6 +116,408 @@ public class MagentoExporter : IMagentoExporter
         {
             // cancellazione batch → uscita pulita
         }
+    }
+
+    private async Task ImportByCsvAsync(
+    List<ResolvedProduct> products,
+    Customer customer,
+    BatchExecution b,
+    CancellationToken token)
+    {
+        var file = await GenerateCsvAsync(products, b.Id.ToString(), token);
+
+        var finalFile = await ZipIfNeededAsync(file, token);
+
+        await UploadFtpAsync(finalFile, customer!, token);
+
+        var processId = await LaunchMagentoImportAsync(customer!, b.Id.ToString(), token);
+
+        await _batchRepo.UpdatProcessId(b.Id.ToString(), processId);
+
+        await PollImportStatusAsync(customer, b.Id.ToString(), token);
+    }
+
+    private async Task<string> GenerateCsvAsync(
+        List<ResolvedProduct> products,
+        string batchId,
+        CancellationToken token)
+    {
+        var root = _env.ContentRootPath;
+        var parent = Directory.GetParent(root)!.FullName;
+
+        var file = Path.Combine(
+            parent,
+            "Export",
+           "magento_import_" + batchId + ".csv"
+        );
+
+        using var sw = new StreamWriter(file, false, Encoding.UTF8);
+
+        await sw.WriteLineAsync(
+            "sku,store_view_code,attribute_set_code,product_type,categories," +
+            "product_websites,name,description,short_description,weight,status," +
+            "visibility,price,special_price,special_from_date,special_to_date," +
+            "tax_class_name,qty,manufacturer,ean,supplier");
+
+        foreach (var p in products)
+        {
+            var normalPrice =
+                p.OriginalPrice == 0 ? p.Price : p.OriginalPrice;
+
+            var specialPrice =
+                p.OriginalPrice > p.Price
+                ? p.Price.ToString(CultureInfo.InvariantCulture)
+                : "";
+
+            var row = string.Join(",",
+                Csv(p.Aic),
+                Csv("default"),
+                Csv("Default"),
+                Csv("simple"),
+                Csv(p.MagentoCategoryId),
+                Csv("base"),
+                Csv(p.Name),
+                Csv(p.LongDescription ?? p.ShortDescription),
+                Csv(p.ShortDescription),
+                Csv("0.05"),
+                Csv("1"),
+                Csv("Catalog, Search"),
+                Csv(normalPrice.ToString(CultureInfo.InvariantCulture)),
+                Csv(specialPrice),
+                Csv(""),
+                Csv(""),
+                Csv("10"),
+                Csv(p.Availability.ToString()),
+                Csv(p.Producer),
+                Csv(p.Aic),
+                Csv(p.SupplierCode)
+            );
+
+            await sw.WriteLineAsync(row);
+        }
+
+        return file;
+    }
+
+    private async Task UploadFtpAsync(
+    string localFile,
+    Customer customer,
+    CancellationToken token)
+    {
+        var host = customer.Magento!.FtpHost;
+        var user = customer.Magento.FtpUser;
+        var pass = customer.Magento.FtpPassword;
+        var remoteFolder =
+                customer.Magento.MagentoRootPath.TrimEnd('/') + "/var/import";
+
+        var remoteFile =
+            remoteFolder + "/" + Path.GetFileName(localFile);
+
+        var isSftp = await IsSftpAsync(host, token);
+
+        if (isSftp)
+        {
+            using var sftp = new Renci.SshNet.SftpClient(
+                host,
+                22,
+                user,
+                pass);
+
+            sftp.Connect();
+
+            if (!sftp.IsConnected)
+                throw new Exception("Connessione SFTP fallita");
+
+            using var fs = File.OpenRead(localFile);
+
+            EnsureSftpDirectoryExists(sftp, remoteFolder);
+
+            try
+            {
+                sftp.UploadFile(fs, remoteFile, true);
+            }
+            catch(Exception e)
+            {
+                var ex = e;
+            }
+
+            sftp.Disconnect();
+        }
+        else
+        {
+            using var ftp = new FluentFTP.FtpClient(
+                host,
+                user,
+                pass);
+
+            ftp.Connect();
+
+            if (!ftp.IsConnected)
+                throw new Exception("Connessione FTP fallita");
+
+            ftp.UploadFile(
+                localFile,
+                remoteFile,
+                FtpRemoteExists.Overwrite,
+                true);
+
+            ftp.Disconnect();
+        }
+    }
+
+    private void EnsureSftpDirectoryExists(
+    Renci.SshNet.SftpClient sftp,
+    string path)
+    {
+        var parts = path.Split(
+            '/',
+            StringSplitOptions.RemoveEmptyEntries);
+
+        var current = "/";
+
+        foreach (var part in parts)
+        {
+            current += part + "/";
+
+            if (!sftp.Exists(current))
+            {
+                sftp.CreateDirectory(current);
+            }
+        }
+    }
+
+    private async Task<bool> IsSftpAsync(
+    string host,
+    CancellationToken token)
+    {
+        try
+        {
+            using var tcp = new TcpClient();
+
+            var connectTask = tcp.ConnectAsync(host, 22);
+
+            var completed = await Task.WhenAny(
+                connectTask,
+                Task.Delay(3000, token));
+
+            if (completed != connectTask)
+                return false;
+
+            using var stream = tcp.GetStream();
+
+            var buffer = new byte[256];
+
+            var readTask = stream.ReadAsync(buffer, 0, buffer.Length, token);
+
+            completed = await Task.WhenAny(
+                readTask,
+                Task.Delay(3000, token));
+
+            if (completed != readTask)
+                return false;
+
+            var banner = Encoding.ASCII.GetString(
+                buffer,
+                0,
+                readTask.Result);
+
+            return banner.StartsWith("SSH-");
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task<int> LaunchMagentoImportAsync(
+        Customer customer,
+        string batchId,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        using var client = new SshClient(
+            customer.Magento!.FtpHost,
+            customer.Magento.FtpUser,
+            customer.Magento.FtpPassword);
+
+        client.ConnectionInfo.Timeout = TimeSpan.FromSeconds(10);
+
+        client.Connect();
+
+        if (!client.IsConnected)
+            throw new Exception("Connessione SSH fallita.");
+
+        /*
+         * evita doppio avvio stesso batch
+         */
+        var checkCmd = client.CreateCommand(
+            $"pgrep -f \"heron:import {batchId}\"");
+
+        checkCmd.CommandTimeout = TimeSpan.FromSeconds(5);
+
+        var running = checkCmd.Execute().Trim();
+
+        if (!string.IsNullOrWhiteSpace(running))
+            throw new Exception(
+                $"Import Magento già in esecuzione per batch {batchId}");
+
+        var logFolder = "var/log/heron";
+
+        /*
+         * avvio detached + ritorno PID immediato
+         */
+        var pidFile = $"{logFolder}/{batchId}.pid";
+
+        var startCmd =
+            $"cd {customer.Magento.MagentoRootPath} && " +
+            $"mkdir -p {logFolder} && " +
+            $"sh -c 'nohup php bin/magento heron:import {batchId} " +
+            $"> {logFolder}/{batchId}.log 2>&1 < /dev/null & echo $! > {pidFile}'";
+
+            client.RunCommand(startCmd);
+
+            await Task.Delay(1000, token);
+            var pidText = client.RunCommand(
+                $"cd {customer.Magento.MagentoRootPath} && cat {pidFile}")
+                .Result.Trim();
+
+
+        client.Disconnect();
+
+        if (string.IsNullOrWhiteSpace(pidText))
+            throw new Exception(
+                "Processo Magento non avviato correttamente.");
+
+        return int.Parse(pidText);
+    }
+
+    private async Task PollImportStatusAsync(
+        Customer customer,
+        string batchId,
+        CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            var log = await GetImportLogAsync(
+                customer,
+                batchId,
+                token);
+
+            var items = log
+                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(x => x.StartsWith("OK "))
+                .Select(x => x.Substring(3).Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Distinct()
+                .Select(sku => new InventoryItem
+                {
+                    Id = batchId,
+                    Qty = 0,
+                    Sku = sku
+                })
+                .ToList();
+
+            if(items.Count > 0)
+                await _exportRepo.SetStatusBulkAsync(items, ExportStatus.Insert);
+
+            if (log.Contains("Import completato"))
+            {
+                await _batchRepo.CloseAsync(batchId);
+                return;
+            }
+
+            await Task.Delay(
+                TimeSpan.FromSeconds(5),
+                token);
+        }
+    }
+
+    private async Task<string> GetImportLogAsync(
+        Customer customer,
+        string batchId,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        using var client = new SshClient(
+            customer.Magento!.FtpHost,
+            customer.Magento.FtpUser,
+            customer.Magento.FtpPassword);
+
+        client.Connect();
+
+        var logFile = $"var/log/heron/{batchId}.log";
+
+        var cmd =
+            $"cd {customer.Magento.MagentoRootPath} && " +
+            $"if [ -f {logFile} ]; then tail -50 {logFile}; else echo LOG_NOT_FOUND; fi";
+
+        var result = client.RunCommand(cmd);
+
+        client.Disconnect();
+
+        return result.Result;
+    }
+
+    public async Task StopMagentoImportAsync(
+    string batchId)
+    {
+
+        var b = await _batchRepo.GetByIdAsync(batchId);
+        if (b == null)
+            return;
+
+        var customer = await _customerRepo.GetByIdAsync(b.CustomerId);
+        if (customer == null)
+            return;
+
+        using var client = new SshClient(
+            customer.Magento!.FtpHost,
+            customer.Magento.FtpUser,
+            customer.Magento.FtpPassword);
+
+        client.Connect();
+
+        client.RunCommand($"kill {b.ProcessId}");
+
+        client.RunCommand(
+            $"pkill -f \"heron:import {batchId}\"");
+
+        client.Disconnect();
+
+        await Task.CompletedTask;
+    }
+
+    private string Csv(object? value)
+    {
+        if (value == null)
+            return "\"\"";
+
+        var text = value.ToString() ?? "";
+
+        text = text.Replace("\"", "\"\"");
+
+        return $"\"{text}\"";
+    }
+    private async Task<string> ZipIfNeededAsync(
+    string file,
+    CancellationToken token)
+    {
+        var fi = new FileInfo(file);
+
+        if (fi.Length < 100_000_000)
+            return file;
+
+        var zip = Path.ChangeExtension(file, ".zip");
+
+        using var archive = ZipFile.Open(zip, ZipArchiveMode.Create);
+
+        archive.CreateEntryFromFile(file, Path.GetFileName(file));
+
+        await Task.CompletedTask;
+
+        return zip;
     }
 
 

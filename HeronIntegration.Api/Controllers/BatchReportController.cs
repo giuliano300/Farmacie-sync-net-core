@@ -11,13 +11,16 @@ public class BatchReportController : ControllerBase
 {
     private readonly IBatchReportRepository _batchRepoReport;
     private readonly IBatchRepository _batchRepo;
+    private readonly IBatchManagerService _batchManagerService;
     public BatchReportController(
         IBatchReportRepository batchRepoReport,
-        IBatchRepository batchRepo
+        IBatchRepository batchRepo,
+        IBatchManagerService batchManagerService
         )
     {
         _batchRepoReport = batchRepoReport;
         _batchRepo = batchRepo;
+        _batchManagerService = batchManagerService;
     }
 
     [HttpGet]
@@ -78,7 +81,7 @@ public class BatchReportController : ControllerBase
     {
         try
         {
-            await _batchRepo.DeleteAsync(id);
+            await _batchManagerService.DeleteAsync(id);
             return true;
         }
         catch (Exception e)

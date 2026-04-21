@@ -142,5 +142,7 @@ builder.Services.AddSingleton<BatchProcessManager>();
 
 builder.Services.AddScoped<IFarmadatiUpdatesRepository, FarmadatiUpdatesRepository>();
 
+builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
+
 var host = builder.Build();
 host.Run();

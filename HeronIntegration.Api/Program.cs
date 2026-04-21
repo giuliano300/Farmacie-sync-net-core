@@ -169,6 +169,8 @@ builder.Services.AddScoped<MagentoExportStepProcessor>();
 builder.Services.AddSingleton<BatchProcessManager>();
 
 builder.Services.AddScoped<IFarmadatiUpdatesRepository, FarmadatiUpdatesRepository>();
+builder.Services.AddHttpClient<IMagentoExporter, MagentoExporter>();
+builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
 
 
 builder.Services.AddCors(options =>

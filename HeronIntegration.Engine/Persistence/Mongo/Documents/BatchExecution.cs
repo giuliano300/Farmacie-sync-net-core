@@ -31,4 +31,5 @@ public class BatchExecution
     public string? HeronFilePath { get; set; }
     public int? totalMagentoProducts { get; set; }
     public int? totalDownloadMagentoProducts { get; set; }
+    public int? ProcessId { get; set; }
 }

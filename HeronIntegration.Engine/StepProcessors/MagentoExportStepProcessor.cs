@@ -94,6 +94,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             // 🔹 CRON + FINALIZE
             await exporter.RunMagentoCronAsync(token);
             await _batchFinalizer.FinalizeBatchAsync(batchId);
+            await exporter.StopMagentoImportAsync(batchId);
 
             result.Success = true;
         }
@@ -266,4 +267,5 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         await exporter.UpdateStockBulkAsync(items, token);
     }
+
 }

@@ -41,4 +41,6 @@ public interface IMagentoExporter
 
     Task<List<MagentoAttributeOption>> GetAttributeManufacturerAsync(CancellationToken token);
 
+    Task StopMagentoImportAsync(string batchId);
+
 }

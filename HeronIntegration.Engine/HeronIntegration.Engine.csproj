@@ -7,6 +7,12 @@
     <UserSecretsId>dotnet-HeronIntegration.Engine-7964cdfc-77a3-410c-af52-f397d539b042</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="Export\**" />
+    <Content Remove="Export\**" />
+    <EmbeddedResource Remove="Export\**" />
+    <None Remove="Export\**" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Core.Renci.SshNet" Version="2021.10.2" />
     <PackageReference Include="FluentFTP" Version="52.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.12" />

@@ -14,6 +14,8 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
         private readonly IBatchReportService _reportService;
         private readonly IExportRepository _exportRepo;
         private readonly IBatchRepository _batchRepo;
+        private readonly ICustomerRepository _customerRepo;
+        private readonly IMagentoExporterFactory _magentoExporterFactory;
 
         public BatchFinalizerService(
             IRawProductRepository rawRepo,
@@ -21,7 +23,9 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
             IResolvedProductRepository resolvedRepo,
             IBatchReportService reportService,
             IExportRepository exportRepo,
-            IBatchRepository batchRepo
+            IBatchRepository batchRepo,
+            ICustomerRepository customerRepo,
+            IMagentoExporterFactory magentoExporterFactory
             )
         {
             _rawRepo = rawRepo;
@@ -30,6 +34,8 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
             _reportService = reportService;
             _exportRepo = exportRepo;
             _batchRepo = batchRepo;
+            _customerRepo = customerRepo;
+            _magentoExporterFactory = magentoExporterFactory;
         }
 
         public async Task FinalizeBatchAsync(string batchId)
@@ -44,6 +50,18 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
             await _rawRepo.DeleteByBatchAsync(batchId);
             await _enrichedRepo.DeleteByBatchAsync(batchId);
             await _resolvedRepo.DeleteByBatchAsync(batchId);
+
+
+            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId)
+                ?? throw new Exception("Customer non trovato");
+
+            if (customer.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var exporter = _magentoExporterFactory.Create(customer.Magento);
+
+            await exporter.StopMagentoImportAsync(batchId);
         }
     }
 }

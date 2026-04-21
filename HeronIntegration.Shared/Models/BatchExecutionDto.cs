@@ -12,4 +12,5 @@ public class BatchExecutionDto
     public int SequenceNumber { get; set; }
     public int? totalMagentoProducts { get; set; }
     public int? totalDownloadMagentoProducts { get; set; }
+    public int? ProcessId { get; set; }
 }
