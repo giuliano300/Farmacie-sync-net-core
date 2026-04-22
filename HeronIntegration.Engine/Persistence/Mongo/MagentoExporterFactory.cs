@@ -17,6 +17,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo
         private readonly IBatchRepository _batchRepo;
         private readonly ICustomerRepository _customerRepo;
         private readonly IHostEnvironment _env;
+        private readonly ICustomerMagentoCategoriesRepository _customerMagentoCategoriesRepository;
 
         public MagentoExporterFactory(
             IHttpClientFactory httpFactory,
@@ -24,7 +25,8 @@ namespace HeronIntegration.Engine.Persistence.Mongo
             IExportRepository exportRepo,
             IBatchRepository batchRepo,
             ICustomerRepository customerRepo,
-            IHostEnvironment env)
+            IHostEnvironment env,
+            ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository    )
         {
             _httpFactory = httpFactory;
             _imageStorage = imageStorage;
@@ -32,6 +34,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo
             _batchRepo = batchRepo;
             _customerRepo = customerRepo;
             _env = env;
+            _customerMagentoCategoriesRepository = customerMagentoCategoriesRepository;
         }
 
         public IMagentoExporter Create(MagentoConfig config)
@@ -45,7 +48,8 @@ namespace HeronIntegration.Engine.Persistence.Mongo
                 config,
                 _batchRepo,
                 _customerRepo,
-                _env
+                _env,
+                _customerMagentoCategoriesRepository
             );
         }
     }

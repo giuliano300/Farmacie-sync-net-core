@@ -89,7 +89,7 @@ public class CategoryMappingsController : ControllerBase
 
             //Import Magento-->Mongo
             var nodes = await exporter.GetCategoryAsync(token);
-            var categories = exporter.FlattenCategoriesNodes(nodes, customerId);
+            var categories = exporter.FlattenCategoriesNodes(nodes, customerId, "Default Category");
             await _customeMagentoRepo.CreateAsync(customerId, categories);
 
             //Import Heron-->Mongo

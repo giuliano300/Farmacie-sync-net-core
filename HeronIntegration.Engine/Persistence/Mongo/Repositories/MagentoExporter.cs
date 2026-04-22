@@ -5,17 +5,14 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
-using MongoDB.Bson.IO;
 using Renci.SshNet;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
-using System.Reflection.Metadata;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Channels;
 
 public class MagentoExporter : IMagentoExporter
@@ -27,6 +24,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly IBatchRepository _batchRepo;
     private readonly IHostEnvironment _env;
     private readonly ICustomerRepository _customerRepo;
+    private readonly ICustomerMagentoCategoriesRepository _customerMagentoCategoriesRepository;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
 
     private const int MaxParallel = 8;
@@ -38,7 +36,8 @@ public class MagentoExporter : IMagentoExporter
         MagentoConfig magento,
         IBatchRepository batchRepo,
         ICustomerRepository customerRepo,
-        IHostEnvironment env)
+        IHostEnvironment env,
+        ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository)
     {
         _http = http;
         _imageStorage = imageStorage;
@@ -55,6 +54,7 @@ public class MagentoExporter : IMagentoExporter
         _http.DefaultRequestVersion = HttpVersion.Version20;
         _http.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
         _env = env;
+        _customerMagentoCategoriesRepository = customerMagentoCategoriesRepository;
     }
 
     // =====================================================
@@ -124,7 +124,7 @@ public class MagentoExporter : IMagentoExporter
     BatchExecution b,
     CancellationToken token)
     {
-        var file = await GenerateCsvAsync(products, b.Id.ToString(), token);
+        var file = await GenerateCsvAsync(products, b.Id.ToString(), customer.Id, token);
 
         var finalFile = await ZipIfNeededAsync(file, token);
 
@@ -140,6 +140,7 @@ public class MagentoExporter : IMagentoExporter
     private async Task<string> GenerateCsvAsync(
         List<ResolvedProduct> products,
         string batchId,
+        string customerId,
         CancellationToken token)
     {
         var root = _env.ContentRootPath;
@@ -148,38 +149,68 @@ public class MagentoExporter : IMagentoExporter
         var file = Path.Combine(
             parent,
             "Export",
-           "magento_import_" + batchId + ".csv"
+            "magento_import_" + batchId + ".csv"
         );
 
         using var sw = new StreamWriter(file, false, Encoding.UTF8);
 
         await sw.WriteLineAsync(
-            "sku,store_view_code,attribute_set_code,product_type,categories," +
+            "sku,store_view_code,attribute_set_code,product_type,category_ids," +
             "product_websites,name,description,short_description,weight,status," +
             "visibility,price,special_price,special_from_date,special_to_date," +
             "tax_class_name,qty,manufacturer,ean,supplier");
 
+        var magentoCategories =
+            await _customerMagentoCategoriesRepository
+            .GetByCustomerAsync(customerId);
+
         foreach (var p in products)
         {
+            token.ThrowIfCancellationRequested();
+
             var normalPrice =
-                p.OriginalPrice == 0 ? p.Price : p.OriginalPrice;
+                p.OriginalPrice == 0
+                ? p.Price
+                : p.OriginalPrice;
 
             var specialPrice =
                 p.OriginalPrice > p.Price
                 ? p.Price.ToString(CultureInfo.InvariantCulture)
                 : "";
 
+            string categoryIds = "";
+
+            if (p.MagentoCategoryId != null)
+            {
+                int currentId = Convert.ToInt32(p.MagentoCategoryId);
+                var ids = new List<int>();
+
+                while (currentId > 2)
+                {
+                    var cat = magentoCategories!
+                        .FirstOrDefault(x => x.MagentoCategoryId == currentId);
+
+                    if (cat == null)
+                        break;
+
+                    ids.Insert(0, currentId);
+                    currentId = cat.ParentId;
+                }
+
+                categoryIds = string.Join(",", ids);
+            }
+
             var row = string.Join(",",
                 Csv(p.Aic),
                 Csv("default"),
                 Csv("Default"),
                 Csv("simple"),
-                Csv(p.MagentoCategoryId),
+                Csv(categoryIds),
                 Csv("base"),
                 Csv(p.Name),
                 Csv(p.LongDescription ?? p.ShortDescription),
                 Csv(p.ShortDescription),
-                Csv("0.05"),
+                Csv("1"),
                 Csv("1"),
                 Csv("Catalog, Search"),
                 Csv(normalPrice.ToString(CultureInfo.InvariantCulture)),
@@ -198,7 +229,6 @@ public class MagentoExporter : IMagentoExporter
 
         return file;
     }
-
     private async Task UploadFtpAsync(
     string localFile,
     Customer customer,
@@ -1543,12 +1573,14 @@ public class MagentoExporter : IMagentoExporter
     public List<CustomerMagentoCategories> FlattenCategoriesNodes(
     List<CategoryNode> nodes,
     string customerId,
-    string parentPath = "")
+    string parentPath = "Default Category")
     {
         var result = new List<CustomerMagentoCategories>();
 
         if (nodes == null || !nodes.Any())
             return result;
+
+        var n = JsonSerializer.Serialize(nodes);
 
         foreach (var node in nodes)
         {
@@ -1558,7 +1590,7 @@ public class MagentoExporter : IMagentoExporter
             // costruzione path
             var path = string.IsNullOrEmpty(parentPath)
                 ? cleanName
-                : $"{parentPath} > {cleanName}";
+                : $"{parentPath}/{cleanName}";
 
             // 👉 filtro livelli inutili (consigliato)
             if (node.Level <= 4)
