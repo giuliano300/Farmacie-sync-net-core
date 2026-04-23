@@ -704,32 +704,40 @@ public class MagentoExporter : IMagentoExporter
     }
     private async Task UpdateQuantityAsync(string batchId, string sku, int qty, CancellationToken token)
     {
-        var payload = new
+        try
         {
-            stockItem = new
+            var payload = new
             {
-                qty = qty,
-                is_in_stock = qty > 0,
-                manage_stock = true,
-                use_config_manage_stock = false
-            }
-        };
+                stockItem = new
+                {
+                    qty = qty,
+                    is_in_stock = qty > 0,
+                    manage_stock = true,
+                    use_config_manage_stock = false
+                }
+            };
 
-        var req = new HttpRequestMessage(
-            HttpMethod.Put,
-            $"{BaseUrl}/rest/V1/products/{sku}/stockItems/1"
-        );
+            var req = new HttpRequestMessage(
+                HttpMethod.Put,
+                $"{BaseUrl}/rest/V1/products/{sku}/stockItems/1"
+            );
 
-        req.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
-            Encoding.UTF8,
-            "application/json"
-        );
+            req.Content = new StringContent(
+                JsonSerializer.Serialize(payload),
+                Encoding.UTF8,
+                "application/json"
+            );
 
-        //var j = JsonSerializer.Serialize(payload);
+            //var j = JsonSerializer.Serialize(payload);
 
-        await SendAsync(req, token);
+            await SendAsync(req, token);
 
+
+        }
+        catch(Exception e)
+        {
+            var x = e;
+        }
         await _exportRepo.SetStatusAsync(batchId, sku, ExportStatus.UpdatePrice);
     }
 
@@ -1301,7 +1309,9 @@ public class MagentoExporter : IMagentoExporter
                     var description = item.CustomAttributes?
                         .FirstOrDefault(x => x.AttributeCode == "description")?.Value?.ToString();
 
-                   var Categories = ExtractCategories(item.ExtensionAttributes);
+                    var cat = item.CustomAttributes.Where(a => a.AttributeCode.Contains("cat")).ToList();
+
+                   var Categories = ExtractCategories(item.ExtensionAttributes!);
 
                     result.Add(new MagentoSlimProduct
                     {
@@ -1386,6 +1396,30 @@ public class MagentoExporter : IMagentoExporter
                         result.Add(item.GetString() ?? item.GetRawText());
                     break;
             }
+        }
+
+        return result;
+    }
+    private static List<string> ExtractCategoriesIds(List<CustomAttribute> customAttributes)
+    {
+        var result = new List<string>();
+
+        foreach (var link in customAttributes)
+        {
+            if (!link.AttributeCode.Contains("category") && !link.AttributeCode.Contains("categories"))
+                continue;
+            else
+            {
+                var json = JsonSerializer.Serialize(link);
+                using var doc = JsonDocument.Parse(json);
+
+                result = doc.RootElement
+                    .GetProperty("value")
+                    .EnumerateArray()
+                    .Select(x => x.ToString())
+                    .ToList();
+            }
+
         }
 
         return result;
@@ -1531,45 +1565,41 @@ public class MagentoExporter : IMagentoExporter
             }
 
 
-    private async Task ProcessChannelAsync<T>(
+    public async Task ProcessChannelAsync<T>(
         IEnumerable<T> items,
-        Func<T, CancellationToken, Task> handler,
-        CancellationToken token)
+        Func<T, CancellationToken, Task> action,
+        CancellationToken token,
+        int workers = 8,
+        int capacity = 500)
     {
-        var channel = Channel.CreateBounded<T>(new BoundedChannelOptions(2000)
+        var channel = Channel.CreateBounded<T>(new BoundedChannelOptions(capacity)
         {
-            SingleWriter = true,
-            SingleReader = false,
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        // PRODUCER
-        var producer = Task.Run(async () =>
+        var writer = Task.Run(async () =>
         {
-            try
+            foreach (var item in items)
             {
-                foreach (var item in items)
-                    await channel.Writer.WriteAsync(item, token);
+                await channel.Writer.WriteAsync(item, token);
             }
-            finally
-            {
-                channel.Writer.TryComplete();
-            }
+
+            channel.Writer.Complete();
         }, token);
 
-        // WORKERS
-        var workers = Enumerable.Range(0, MaxParallel)
+        var consumers = Enumerable.Range(0, workers)
             .Select(_ => Task.Run(async () =>
             {
                 await foreach (var item in channel.Reader.ReadAllAsync(token))
                 {
-                    await handler(item, token);
+                    await action(item, token);
                 }
-            }, token));
+            }, token))
+            .ToArray();
 
-        await Task.WhenAll(workers.Prepend(producer));
+        await writer;
+        await Task.WhenAll(consumers);
     }
-
     public List<CustomerMagentoCategories> FlattenCategoriesNodes(
     List<CategoryNode> nodes,
     string customerId,

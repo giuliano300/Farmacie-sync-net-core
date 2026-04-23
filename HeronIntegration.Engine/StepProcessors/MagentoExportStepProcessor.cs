@@ -74,7 +74,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                 .Select(x => x.Sku)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // 🔹 prendi SOLO quelli non presenti in Magento
+            // 🔹 prendi SOLO quelli presenti in Magento
             var mappedExisting = mapped
                 .Where(p => magentoSet.Contains(p.Aic))
                 .ToList();
@@ -85,11 +85,11 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             // 🔹 STOCK
             if (type is TypeRun.Completo or TypeRun.UpdatePrezzi)
-                await HandleStockUpdate(mappedExisting, exporter, batchId, token);
+                await HandleStockUpdate(mapped, exporter, batchId, token);
 
             // 🔹 IMMAGINI
             if (type == TypeRun.ImportImmagini)
-                await exporter.UpdateImageBulkAsync(mappedExisting, token);
+                await exporter.UpdateImageBulkAsync(mapped, token);
 
             // 🔹 CRON + FINALIZE
             await exporter.RunMagentoCronAsync(token);
@@ -228,13 +228,13 @@ public class MagentoExportStepProcessor : IStepProcessor
         if (!DescriptionEquals(magento, mongo))
             return true;
 
-        var mongoCat = exporter
-            .ResolveCategoryId(metadata.categories!, mongo.SubCategory, default)
-            ?.ToString();
+        //var mongoCat = exporter
+        //    .ResolveCategoryId(metadata.categories!, mongo.SubCategory, default)
+        //    ?.ToString();
 
-        if (!string.IsNullOrWhiteSpace(mongoCat) &&
-            !(magento.Categories ?? new List<string>()).Contains(mongoCat))
-            return true;
+        //if (!string.IsNullOrWhiteSpace(mongoCat) &&
+        //    !(magento.Categories ?? new List<string>()).Contains(mongoCat))
+        //    return true;
 
         return false;
     }
