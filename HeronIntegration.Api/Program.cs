@@ -10,6 +10,7 @@ using HeronIntegration.Engine.Steps;
 using HeronIntegration.Engine.Suppliers;
 using HeronSync.Infrastructure.Farmadati.Providers;
 using MongoDB.Driver;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,6 +26,18 @@ builder.Services.AddSingleton(sp =>
     var client = sp.GetRequiredService<IMongoClient>();
     return client.GetDatabase(builder.Configuration["Mongo:Database"]);
 });
+
+// Logger
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.File(
+        "C:\\inetpub\\wwwroot\\logs\\log-.txt",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 7
+    )
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 builder.Services.AddScoped<MongoContext>();
 

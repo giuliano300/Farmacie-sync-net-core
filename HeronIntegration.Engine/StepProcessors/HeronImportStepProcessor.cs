@@ -24,6 +24,7 @@ public class HeronImportStepProcessor : IStepProcessor
     private readonly ICleanupService _cleanupService;
     private readonly IProductToExcludeRepository _productToExcludeRepository;
     private readonly ICustomerRepository _customerRepo;
+    private readonly ILogger<HeronImportStepProcessor> _logger;
 
     public HeronImportStepProcessor(
         IBatchRepository batchRepo,
@@ -35,7 +36,8 @@ public class HeronImportStepProcessor : IStepProcessor
         IStepRepository stepRepo,
         ICleanupService cleanupService,
         IProductToExcludeRepository productToExcludeRepository,
-        ICustomerRepository customerRepo)
+        ICustomerRepository customerRepo,
+        ILogger<HeronImportStepProcessor> logger)
     {
         _batchRepo = batchRepo;
         _rawRepo = rawRepo;
@@ -47,6 +49,7 @@ public class HeronImportStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
         _productToExcludeRepository = productToExcludeRepository;
         _customerRepo = customerRepo;
+        _logger = logger;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
@@ -198,6 +201,7 @@ public class HeronImportStepProcessor : IStepProcessor
         {
             result.Success = false;
             result.ErrorMessage = ex.Message;
+            _logger.LogError($"Step HeronImport errore :" + ex.Message);
         }
 
         result.FinishedAt = DateTime.UtcNow;

@@ -81,12 +81,7 @@ public class BatchController : ControllerBase
                     error = "Folder non trovato : " + folder
                 });
 
-            var pathFile = Directory.GetFiles(folder).FirstOrDefault();
-            if (pathFile == null)
-                return StatusCode(500, new
-                {
-                    error = "Path file non trovato : " + pathFile
-                });
+            var pathFile = folder + "/heron.xml";
 
             var seq = await _batchRepo.GetNextSequenceAsync(customerId);
             var batch = new BatchExecution

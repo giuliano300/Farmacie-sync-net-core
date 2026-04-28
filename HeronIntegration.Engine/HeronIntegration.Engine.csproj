@@ -15,10 +15,13 @@
   <ItemGroup>
     <PackageReference Include="Core.Renci.SshNet" Version="2021.10.2" />
     <PackageReference Include="FluentFTP" Version="52.0.0" />
+    <PackageReference Include="log4net" Version="3.3.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.12" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.2" />
     <PackageReference Include="MongoDB.Bson" Version="3.6.0" />
     <PackageReference Include="MongoDB.Driver" Version="3.6.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HeronIntegration.Shared\HeronIntegration.Shared.csproj" />
