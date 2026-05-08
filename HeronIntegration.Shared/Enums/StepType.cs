@@ -16,7 +16,7 @@ namespace HeronIntegration.Shared.Enums
     public enum TypeRun
     {
         Completo = 0,
-        ImpportProdotti = 1,
+        ImportProdotti = 1,
         UpdatePrezzi = 2,
         ImportImmagini = 3
     }

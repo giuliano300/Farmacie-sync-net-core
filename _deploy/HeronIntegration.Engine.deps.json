@@ -15,6 +15,7 @@
           "Microsoft.Extensions.Http": "10.0.2",
           "MongoDB.Bson": "3.6.0",
           "MongoDB.Driver": "3.6.0",
+          "Newtonsoft.Json.Bson": "1.0.3",
           "Serilog.AspNetCore": "10.0.0",
           "Serilog.Sinks.File": "7.0.0",
           "System.ServiceModel.Http": "8.1.2",
@@ -491,6 +492,25 @@
           "lib/net6.0/MongoDB.Driver.dll": {
             "assemblyVersion": "3.6.0.0",
             "fileVersion": "3.6.0.0"
+          }
+        }
+      },
+      "Newtonsoft.Json/13.0.4": {
+        "runtime": {
+          "lib/net6.0/Newtonsoft.Json.dll": {
+            "assemblyVersion": "13.0.0.0",
+            "fileVersion": "13.0.4.30916"
+          }
+        }
+      },
+      "Newtonsoft.Json.Bson/1.0.3": {
+        "dependencies": {
+          "Newtonsoft.Json": "13.0.4"
+        },
+        "runtime": {
+          "lib/netstandard2.0/Newtonsoft.Json.Bson.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.3.29904"
           }
         }
       },
@@ -981,6 +1001,7 @@
       "HeronIntegration.Shared/1.0.0": {
         "dependencies": {
           "MongoDB.Bson": "3.6.0",
+          "Newtonsoft.Json": "13.0.4",
           "Serilog.AspNetCore": "10.0.0",
           "Serilog.Sinks.File": "7.0.0"
         },
@@ -1264,6 +1285,20 @@
       "sha512": "sha512-MzEVPUo9FJ3A2fvXdKr0vGllbiAGvpyLa8bU6bucKSKndraSjfgGDn/J+ek/SrUK4A3yozYZBkwJZm8qe36VmQ==",
       "path": "mongodb.driver/3.6.0",
       "hashPath": "mongodb.driver.3.6.0.nupkg.sha512"
+    },
+    "Newtonsoft.Json/13.0.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-pdgNNMai3zv51W5aq268sujXUyx7SNdE2bj1wZcWjAQrKMFZV260lbqYop1d2GM67JI1huLRwxo9ZqnfF/lC6A==",
+      "path": "newtonsoft.json/13.0.4",
+      "hashPath": "newtonsoft.json.13.0.4.nupkg.sha512"
+    },
+    "Newtonsoft.Json.Bson/1.0.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-bCcwagnHfYnhwQfY1criEcn6Hy9PtBuVnZu0pA8hmRhuR3jI/8WxVgoVAdNw9BJ3JHkxmWJzpj/AQy+PMMLqxg==",
+      "path": "newtonsoft.json.bson/1.0.3",
+      "hashPath": "newtonsoft.json.bson.1.0.3.nupkg.sha512"
     },
     "Serilog/4.3.0": {
       "type": "package",

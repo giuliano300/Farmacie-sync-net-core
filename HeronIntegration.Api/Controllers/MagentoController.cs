@@ -152,7 +152,7 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                await exporter.RunMagentoCronAsync(token);
+                await exporter.ReindexAllAsync(toUpsert, token);
 
                 await _batchFinalizer.FinalizeBatchAsync(batchId);
             }

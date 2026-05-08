@@ -74,27 +74,35 @@ public class MagentoExportStepProcessor : IStepProcessor
                 .Select(x => x.Sku)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // 🔹 prendi SOLO quelli presenti in Magento
-            var mappedExisting = mapped
-                .Where(p => magentoSet.Contains(p.Aic))
-                .ToList();
-
+            var skus = new List<string>();
             // 🔹 UPSERT
-            if (type is TypeRun.Completo or TypeRun.ImpportProdotti)
-                await HandleProductUpsert(metadata, mapped, exporter, batchId, token, type);
+            if (type is TypeRun.Completo or TypeRun.ImportProdotti)
+                skus = await HandleProductUpsert(metadata, mapped, exporter, batchId, token, type);
 
             // 🔹 STOCK
             if (type is TypeRun.Completo or TypeRun.UpdatePrezzi)
+            {
+                if (type is TypeRun.UpdatePrezzi)
+                {
+                    skus = mapped.Select(x => x.Aic).ToList();
+                }
                 await HandleStockUpdate(mapped, exporter, batchId, token);
+            }
 
             // 🔹 IMMAGINI
-            if (type == TypeRun.ImportImmagini)
+            if (type is TypeRun.ImportImmagini)
+            {
+                skus = mapped.Where(a => a.Images.Count > 0).Select(x => x.Aic).ToList();
                 await exporter.UpdateImageBulkAsync(mapped, token);
+            }
+
+            if (skus.Count() > 0)
+                await exporter.ReindexAsync(skus, token);
 
             // 🔹 CRON + FINALIZE
-            await exporter.RunMagentoCronAsync(token);
+            //await exporter.RunMagentoCronAsync(token);
             await _batchFinalizer.FinalizeBatchAsync(batchId);
-            await exporter.StopMagentoImportAsync(batchId);
+            //await exporter.StopMagentoImportAsync(batchId);
 
             result.Success = true;
         }
@@ -128,7 +136,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         }).ToList();
     }
 
-    private async Task HandleProductUpsert(
+    private async Task<List<string>> HandleProductUpsert(
         MagentoMetadata metadata,
         List<ResolvedProduct> mapped,
         IMagentoExporter exporter,
@@ -208,6 +216,11 @@ public class MagentoExportStepProcessor : IStepProcessor
             if (toDisable.Count > 0)
                 await exporter.DisableProductsAsync(toDisable, token);
         }
+
+        if (toUpsert.Count == 0)
+            return null;
+        else
+            return toUpsert.Select(a => a.Aic).ToList();
     }
 
     private bool NeedsUpdate(

@@ -7,6 +7,7 @@ using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using MongoDB.Bson.IO;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Renci.SshNet;
 using SharpCompress.Common;
 using System.Collections.Concurrent;
@@ -91,7 +92,10 @@ public class MagentoExporter : IMagentoExporter
     {
         try
         {
-            var l = products.Take(5).ToList();
+            var l = products.ToList();
+
+            var img = System.Text.Json.JsonSerializer.Serialize(l[0].Images);
+
             var batchId = l[0].BatchId.ToString();
             var b = await _batchRepo.GetByIdAsync(batchId);
             if (b == null)
@@ -144,38 +148,6 @@ public class MagentoExporter : IMagentoExporter
                                 await _exportRepo.SetErrorAsync(batchId, item.Sku, item.Message);
                         }
                     });
-
-                var distinctSkus =
-                    importedSkus
-                .Distinct()
-                .ToList();
-
-                if (!distinctSkus.Any())
-                    return;
-
-                /*
-                |--------------------------------------------------------------------------
-                | REINDEX CHUNK
-                |--------------------------------------------------------------------------
-                */
-
-                foreach (
-                    var skuChunk
-                    in distinctSkus.Chunk(1000)
-                )
-                {
-                    try
-                    {
-                        await ReindexAsync(
-                            skuChunk.ToList(),
-                            token
-                        );
-                    }
-                    catch (Exception ex)
-                    {
-                       
-                    }
-                }
             }
 
             else
@@ -191,7 +163,7 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🔥 REINDEX SU CUSTOM API
     // =====================================================
-    private async Task ReindexAsync(
+    public async Task ReindexAsync(
     List<string> skus,
     CancellationToken token)
     {
@@ -303,6 +275,139 @@ public class MagentoExporter : IMagentoExporter
             );
     }
 
+
+    // =====================================================
+    // 🔥 UPSERT IMMAGINI API CUSTOM
+    // =====================================================
+    private async Task UploadImagesBulkAsync(
+    List<ResolvedProduct> products,
+    CancellationToken token)
+    {
+        try
+        {
+            /*
+            |--------------------------------------------------------------------------
+            | PAYLOAD
+            |--------------------------------------------------------------------------
+            */
+
+            var payload =
+                new List<object>();
+
+            foreach (var product in products)
+            {
+                try
+                {
+                    if (
+                        product.Images == null ||
+                        !product.Images.Any()
+                    )
+                    {
+                        continue;
+                    }
+
+                    var imgs = await MapMagentoImagesAsync(product, token);
+
+                    var images =
+                        new List<object>();
+
+                    foreach (var img in imgs.images)
+                    {
+                        try { 
+                            images.Add(
+                                new
+                                {
+                                    name = img.name,
+                                    base64 = img.base64
+                                });
+                        }
+                        catch (Exception ex)
+                        {
+                          
+                        }
+                    }
+
+                    if (!images.Any())
+                        continue;
+
+                    payload.Add(
+                        new
+                        {
+                            sku = product.Aic,
+                            images = images
+                        });
+                }
+                catch (Exception ex)
+                {
+                }
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | EMPTY
+            |--------------------------------------------------------------------------
+            */
+
+            if (!payload.Any())
+                return;
+
+            /*
+            |--------------------------------------------------------------------------
+            | JSON
+            |--------------------------------------------------------------------------
+            */
+
+            var json =
+                System.Text.Json.JsonSerializer
+                    .Serialize(
+                        new
+                        {
+                            items =
+                                System.Text.Json.JsonSerializer
+                                    .Serialize(payload)
+                        });
+
+            using var content =
+                new StringContent(
+                    json,
+                    Encoding.UTF8,
+                    "application/json"
+                );
+
+            /*
+            |--------------------------------------------------------------------------
+            | REQUEST
+            |--------------------------------------------------------------------------
+            */
+
+            using var response =
+                await _http.PostAsync(
+                    $"{BaseUrl}/rest/V1/heron/images",
+                    content,
+                    token
+                );
+
+            var responseContent =
+                await response.Content
+                    .ReadAsStringAsync(token);
+
+            /*
+            |--------------------------------------------------------------------------
+            | RESPONSE
+            |--------------------------------------------------------------------------
+            */
+
+            if (!response.IsSuccessStatusCode)
+            {
+               
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+        }
+    }
+
     // =====================================================
     // 🔥 MAP PRODOTTO MAGENTO API CUSTOM
     // =====================================================
@@ -360,6 +465,81 @@ public class MagentoExporter : IMagentoExporter
                     }
                     : new List<int>()
         };
+    }
+
+    // =====================================================
+    // 🔥 MAP IMMAGINI MAGENTO API CUSTOM
+    // =====================================================
+    private async Task<MagentoImageRequest>
+    MapMagentoImagesAsync(
+        ResolvedProduct product,
+        CancellationToken token)
+    {
+        var result =
+            new MagentoImageRequest
+            {
+                sku = product.Aic
+            };
+
+        if (
+            product.Images == null ||
+            product.Images.Count == 0
+        )
+        {
+            return result;
+        }
+
+        foreach (var image in product.Images)
+        {
+            try
+            {
+                if (image.GridFsId == null)
+                    continue;
+
+                /*
+                |--------------------------------------------------------------------------
+                | GRIDFS DOWNLOAD
+                |--------------------------------------------------------------------------
+                */
+
+                var bytes =
+                    await _imageStorage
+                    .GetBase64Async(
+                        (MongoDB.Bson.ObjectId)
+                        image.GridFsId
+                    );
+
+                if (
+                    bytes == null ||
+                    bytes.Length == 0
+                )
+                {
+                    continue;
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | BASE64
+                |--------------------------------------------------------------------------
+                */
+
+
+                result.images.Add(
+                    new MagentoImageItem
+                    {
+                        name =
+                            image.AltText
+                            ?? $"{Guid.NewGuid()}.jpg",
+
+                        base64 = bytes
+                    });
+            }
+            catch (Exception ex)
+            {
+            }
+        }
+
+        return result;
     }
 
     private async Task ImportByCsvAsync(
@@ -879,6 +1059,16 @@ public class MagentoExporter : IMagentoExporter
         return import;
     }
 
+    public async Task ReindexAllAsync(
+    List<ResolvedProduct> products, CancellationToken token)
+    {
+
+        await ReindexAsync(
+            products.Select(a=>a.Aic).ToList(),
+            token
+        );
+    }
+
     public async Task StopMagentoImportAsync(
     string batchId)
     {
@@ -1138,13 +1328,24 @@ public class MagentoExporter : IMagentoExporter
 
             //INVIO IMMAGINE UNO AD UNO
             if (!c.Msi)
-                await ProcessChannelAsync(
-                items,
-                async (item, ct) =>
-                {
-                    await UploadImagesAsync(item, ct);
-                },
-                token);
+            {
+                var l = items.Where(a=>a.Images.Count > 0).ToList();
+
+                var chunksImg = l.Chunk(20);
+
+                await Parallel.ForEachAsync(
+                    chunksImg,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = 2,
+                        CancellationToken = token
+                    },
+                    async (chunksImg, ct) =>
+                    {
+                        await UploadImagesBulkAsync(chunksImg.ToList(), token);
+
+                    });
+            }
             else
                 await ImportImagesBulkAsync(items, token);
         }
