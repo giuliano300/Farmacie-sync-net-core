@@ -188,8 +188,9 @@ public class MagentoExporter : IMagentoExporter
         }
     }
 
-
-    //REINDEX SU CUSTOM API
+    // =====================================================
+    // 🔥 REINDEX SU CUSTOM API
+    // =====================================================
     private async Task ReindexAsync(
     List<string> skus,
     CancellationToken token)
@@ -243,7 +244,9 @@ public class MagentoExporter : IMagentoExporter
         }
     }
 
-    //IMPORT MASSIVO SU CUSTOM API
+    // =====================================================
+    // 🔥 UPSERT PRODOTTO API CUSTOM
+    // =====================================================
     private async Task<MagentoImportResponse?>
         UpsertProductCustomBulkAsync(
             List<ResolvedProduct> products,
@@ -300,6 +303,9 @@ public class MagentoExporter : IMagentoExporter
             );
     }
 
+    // =====================================================
+    // 🔥 MAP PRODOTTO MAGENTO API CUSTOM
+    // =====================================================
     private MagentoBulkProduct MapMagentoProduct(
     ResolvedProduct x)
     {
