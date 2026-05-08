@@ -5,14 +5,20 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
+using MongoDB.Bson.IO;
+using Newtonsoft.Json;
 using Renci.SshNet;
+using SharpCompress.Common;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 
 public class MagentoExporter : IMagentoExporter
@@ -27,7 +33,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly ICustomerMagentoCategoriesRepository _customerMagentoCategoriesRepository;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
 
-    private const int MaxParallel = 8;
+    private const int MaxParallel = 20;
 
     public MagentoExporter(
         HttpClient http,
@@ -85,7 +91,7 @@ public class MagentoExporter : IMagentoExporter
     {
         try
         {
-            var l = products.ToList();
+            var l = products.Take(5).ToList();
             var batchId = l[0].BatchId.ToString();
             var b = await _batchRepo.GetByIdAsync(batchId);
             if (b == null)
@@ -98,14 +104,78 @@ public class MagentoExporter : IMagentoExporter
             //INVIO UNO PER UNO
             if (!c.Msi)
             {
-                await ImportByCsvAsync(l, c, b, token);
-                //await ProcessChannelAsync(
-                //   l,
-                // async (item, ct) =>
-                // {
-                //await UpsertProductAsync(item, batchId, ct);
-                //},
-                //token);
+                var importedSkus = new ConcurrentBag<string>();
+
+                var chunks = l.Chunk(1000);
+
+                await Parallel.ForEachAsync(
+                    chunks,
+                    new ParallelOptions
+                    {
+                        MaxDegreeOfParallelism = 3,
+                        CancellationToken = token
+                    },
+                    async (chunk, ct) =>
+                    {
+                        var result =
+                            await UpsertProductCustomBulkAsync(
+                                chunk.ToList(),
+                                batchId,
+                                ct
+                            );
+
+                        if (result?.Items == null)
+                            return;
+
+                        foreach (var item in result.Items)
+                        {
+                            if (
+                                item.Success &&
+                                (
+                                    item.InsertType == 1 ||
+                                    item.InsertType == 2
+                                )
+                            )
+                            {
+                                importedSkus.Add(item.Sku);
+                                await _exportRepo.SetStatusAsync(batchId, item.Sku, ExportStatus.Insert);
+                            }
+                            if(!item.Success)
+                                await _exportRepo.SetErrorAsync(batchId, item.Sku, item.Message);
+                        }
+                    });
+
+                var distinctSkus =
+                    importedSkus
+                .Distinct()
+                .ToList();
+
+                if (!distinctSkus.Any())
+                    return;
+
+                /*
+                |--------------------------------------------------------------------------
+                | REINDEX CHUNK
+                |--------------------------------------------------------------------------
+                */
+
+                foreach (
+                    var skuChunk
+                    in distinctSkus.Chunk(1000)
+                )
+                {
+                    try
+                    {
+                        await ReindexAsync(
+                            skuChunk.ToList(),
+                            token
+                        );
+                    }
+                    catch (Exception ex)
+                    {
+                       
+                    }
+                }
             }
 
             else
@@ -116,6 +186,174 @@ public class MagentoExporter : IMagentoExporter
         {
             // cancellazione batch → uscita pulita
         }
+    }
+
+
+    //REINDEX SU CUSTOM API
+    private async Task ReindexAsync(
+    List<string> skus,
+    CancellationToken token)
+    {
+        if (
+            skus == null ||
+            skus.Count == 0
+        )
+        {
+            return;
+        }
+
+        try
+        {
+            var request = new
+            {
+                skus = skus
+            };
+
+            var json =
+                System.Text.Json.JsonSerializer.Serialize(
+                    request
+                );
+
+            using var content =
+                new StringContent(
+                    json,
+                    Encoding.UTF8,
+                    "application/json"
+                );
+
+            using var response =
+                await _http.PostAsync(
+                    $"{BaseUrl}/rest/V1/heron/reindex",
+                    content,
+                    token
+                );
+
+            var responseContent =
+                await response.Content
+                    .ReadAsStringAsync(token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+           
+        }
+    }
+
+    //IMPORT MASSIVO SU CUSTOM API
+    private async Task<MagentoImportResponse?>
+        UpsertProductCustomBulkAsync(
+            List<ResolvedProduct> products,
+            string batchId,
+            CancellationToken token)
+    {
+        var mapped =
+            products
+                .Select(MapMagentoProduct)
+                .ToList();
+
+        var request = new
+        {
+            products = System.Text.Json.JsonSerializer.Serialize(
+                mapped
+            )
+        };
+
+        var json =
+            System.Text.Json.JsonSerializer.Serialize(request);
+
+        using var content =
+            new StringContent(
+                json,
+                Encoding.UTF8,
+                "application/json"
+            );
+
+        using var response =
+            await _http.PostAsync(
+                $"{BaseUrl}/rest/V1/heron/import-products",
+                content,
+                token
+            );
+
+        var responseContent =
+            await response.Content
+                .ReadAsStringAsync(token);
+
+        response.EnsureSuccessStatusCode();
+
+        var jsonString =
+        System.Text.Json.JsonSerializer.Deserialize<string>(
+            responseContent
+        );
+
+        return System.Text.Json.JsonSerializer.Deserialize
+            <MagentoImportResponse>(
+                jsonString!,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                }
+            );
+    }
+
+    private MagentoBulkProduct MapMagentoProduct(
+    ResolvedProduct x)
+    {
+        var specialPrice =
+            x.OriginalPrice > x.Price
+                ? x.Price
+                : 0;
+
+        return new MagentoBulkProduct
+        {
+            sku = x.Aic,
+
+            name = x.Name,
+
+            description =
+                x.LongDescription ?? string.Empty,
+
+            short_description =
+                x.ShortDescription ?? string.Empty,
+
+            price =
+                x.OriginalPrice > 0
+                    ? x.OriginalPrice
+                    : x.Price,
+
+            special_price = specialPrice,
+
+            qty = x.Availability,
+
+            status = 1,
+
+            visibility = 4,
+
+            attribute_set_id = 4,
+
+            type_id = "simple",
+
+            manufacturer = Convert.ToInt32(x.Producer),
+
+            supplier = x.SupplierCode!,
+
+            website_ids = new List<int>
+            {
+                1
+            },
+
+            category_ids =
+                x.MagentoCategoryId.HasValue
+                    ? new List<int>
+                    {
+                    x.MagentoCategoryId.Value
+                    }
+                    : new List<int>()
+        };
     }
 
     private async Task ImportByCsvAsync(
@@ -134,7 +372,7 @@ public class MagentoExporter : IMagentoExporter
 
         await _batchRepo.UpdatProcessId(b.Id.ToString(), processId);
 
-        await PollImportStatusAsync(customer, b.Id.ToString(), token);
+        await PollImportStatusAsync(customer, b.Id.ToString(), token, products.Count());
     }
 
     private async Task<string> GenerateCsvAsync(
@@ -149,79 +387,102 @@ public class MagentoExporter : IMagentoExporter
         var file = Path.Combine(
             parent,
             "Export",
-            "magento_import_" + batchId + ".csv"
+            $"magento_import_{batchId}.csv"
         );
 
-        using var sw = new StreamWriter(file, false, Encoding.UTF8);
+        Directory.CreateDirectory(
+            Path.GetDirectoryName(file)!
+        );
 
+        var encoding = new UTF8Encoding(false);
+
+        await using var stream = new FileStream(
+            file,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None
+        );
+
+        await using var sw = new StreamWriter(stream, encoding);
+
+        // HEADER
         await sw.WriteLineAsync(
             "sku,store_view_code,attribute_set_code,product_type,category_ids," +
             "product_websites,name,description,short_description,weight,status," +
             "visibility,price,special_price,special_from_date,special_to_date," +
-            "tax_class_name,qty,manufacturer,ean,supplier");
+            "tax_class_name,qty,is_in_stock,manufacturer,ean,supplier,url_key"
+        );
 
-        var magentoCategories =
-            await _customerMagentoCategoriesRepository
-            .GetByCustomerAsync(customerId);
-
-        foreach (var p in products)
+        foreach (var p in products
+            .GroupBy(x => x.Aic)
+            .Select(x => x.First()))
         {
             token.ThrowIfCancellationRequested();
 
-            var normalPrice =
-                p.OriginalPrice == 0
+            var normalPrice = p.OriginalPrice == 0
                 ? p.Price
                 : p.OriginalPrice;
 
-            var specialPrice =
-                p.OriginalPrice > p.Price
+            var specialPrice = p.OriginalPrice > p.Price
                 ? p.Price.ToString(CultureInfo.InvariantCulture)
                 : "";
 
-            string categoryIds = "";
+            var categoryIds = p.MagentoCategoryId?.ToString() ?? "";
 
-            if (p.MagentoCategoryId != null)
-            {
-                int currentId = Convert.ToInt32(p.MagentoCategoryId);
-                var ids = new List<int>();
+            var isInStock = p.Availability > 0 ? "1" : "0";
 
-                while (currentId > 2)
-                {
-                    var cat = magentoCategories!
-                        .FirstOrDefault(x => x.MagentoCategoryId == currentId);
+            // 🔥 URL KEY SICURA
+            var cleanUrlKey = Regex.Replace(
+                (p.Name ?? "").ToLowerInvariant(),
+                @"[^a-z0-9]+",
+                "-"
+            );
 
-                    if (cat == null)
-                        break;
+            cleanUrlKey = Regex.Replace(cleanUrlKey, @"-+", "-")
+                .Trim('-');
 
-                    ids.Insert(0, currentId);
-                    currentId = cat.ParentId;
-                }
+            cleanUrlKey = $"{cleanUrlKey}-{p.Aic}";
 
-                categoryIds = string.Join(",", ids);
-            }
+            // 🔥 HTML SAFE
+            var description = CleanText(
+                p.LongDescription ??
+                p.ShortDescription ??
+                p.Name
+            );
+
+            var shortDescription = CleanText(
+                p.ShortDescription ??
+                p.Name
+            );
+
+            var name = CleanText(
+                p.Name?.Replace("*", " ")
+            );
 
             var row = string.Join(",",
-                Csv(p.Aic),
-                Csv("default"),
-                Csv("Default"),
-                Csv("simple"),
-                Csv(categoryIds),
-                Csv("base"),
-                Csv(p.Name),
-                Csv(p.LongDescription ?? p.ShortDescription),
-                Csv(p.ShortDescription),
-                Csv("1"),
-                Csv("1"),
-                Csv("Catalog, Search"),
+                Csv(p.Aic),                                             // sku
+                Csv(""),                                                 // store_view_code
+                Csv("Default"),                                         // attribute_set_code
+                Csv("simple"),                                          // product_type
+                Csv(categoryIds),                                       // categories
+                Csv("base"),                                            // websites
+                Csv(name),                                              // name
+                Csv(description),                                       // description
+                Csv(shortDescription),                                  // short_description
+                Csv("1"),                                               // weight
+                Csv("1"),                                               // status
+                Csv("4"),                                               // visibility
                 Csv(normalPrice.ToString(CultureInfo.InvariantCulture)),
                 Csv(specialPrice),
                 Csv(""),
                 Csv(""),
-                Csv("10"),
-                Csv(p.Availability.ToString()),
-                Csv(p.Producer),
+                Csv("Taxable Goods"),
+                Csv(p.Availability.ToString(CultureInfo.InvariantCulture)),
+                Csv(isInStock),
+                Csv(CleanText(p.Producer)),
                 Csv(p.Aic),
-                Csv(p.SupplierCode)
+                Csv(CleanText(p.SupplierCode)),
+                Csv(cleanUrlKey)
             );
 
             await sw.WriteLineAsync(row);
@@ -229,6 +490,39 @@ public class MagentoExporter : IMagentoExporter
 
         return file;
     }
+
+    private static string Csv(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "\"\"";
+
+        value = value
+            .Replace("\r", " ")
+            .Replace("\n", " ")
+            .Replace("\t", " ")
+            .Trim();
+
+        // escape doppi apici
+        value = value.Replace("\"", "\"\"");
+
+        return $"\"{value}\"";
+    }
+
+    private static string CleanText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "";
+
+        value = value.Replace("\0", "");
+
+        // 🔥 mantiene HTML ma pulisce caratteri invalidi
+        value = Regex.Replace(value, @"[\u0000-\u001F]+", " ");
+
+        value = Regex.Replace(value, @"\s+", " ");
+
+        return value.Trim();
+    }
+
     private async Task UploadFtpAsync(
     string localFile,
     Customer customer,
@@ -264,6 +558,20 @@ public class MagentoExporter : IMagentoExporter
 
             try
             {
+
+                var files = sftp.ListDirectory(remoteFolder);
+
+                foreach (var file in files)
+                {
+                    if (file.Name == "." || file.Name == "..")
+                        continue;
+
+                    var fullPath = remoteFolder + "/" + file.Name;
+
+                    if (!file.IsDirectory)
+                        sftp.DeleteFile(fullPath);
+                }
+
                 sftp.UploadFile(fs, remoteFile, true);
             }
             catch(Exception e)
@@ -382,7 +690,7 @@ public class MagentoExporter : IMagentoExporter
          * evita doppio avvio stesso batch
          */
         var checkCmd = client.CreateCommand(
-            $"pgrep -f \"heron:import {batchId}\"");
+            $"pgrep -f \"heron:import\"");
 
         checkCmd.CommandTimeout = TimeSpan.FromSeconds(5);
 
@@ -402,7 +710,7 @@ public class MagentoExporter : IMagentoExporter
         var startCmd =
             $"cd {customer.Magento.MagentoRootPath} && " +
             $"mkdir -p {logFolder} && " +
-            $"sh -c 'nohup php bin/magento heron:import {batchId} " +
+            $"sh -c 'nohup php bin/magento heron:import " +
             $"> {logFolder}/{batchId}.log 2>&1 < /dev/null & echo $! > {pidFile}'";
 
             client.RunCommand(startCmd);
@@ -425,45 +733,84 @@ public class MagentoExporter : IMagentoExporter
     private async Task PollImportStatusAsync(
         Customer customer,
         string batchId,
-        CancellationToken token)
+        CancellationToken token, 
+        int count)
     {
+        int processedCount = 0;
+
         while (!token.IsCancellationRequested)
         {
-            var log = await GetImportLogAsync(
+            var status = await GetImportLogAsync(
                 customer,
                 batchId,
                 token);
 
-            var items = log
-                .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
-                .Where(x => x.StartsWith("OK "))
-                .Select(x => x.Substring(3).Trim())
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct()
-                .Select(sku => new InventoryItem
+            if (status == null)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), token);
+                continue;
+            }
+
+            var content = await GetSkuFileAsync(
+                customer,
+                batchId,
+                token);
+
+            if (!string.IsNullOrWhiteSpace(content) && !content.Contains("EMPTY"))
+            {
+                var allSkus = content
+                    .Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => Newtonsoft.Json.JsonConvert.DeserializeObject<ImportSkuStatus>(x))
+                    .Where(x => x != null)
+                    .ToList();
+
+                // 👉 OFFSET
+                var newSkus = allSkus.Skip(processedCount).ToList();
+                processedCount = allSkus.Count;
+
+                if (newSkus.Count > 0)
                 {
-                    Id = batchId,
-                    Qty = 0,
-                    Sku = sku
-                })
-                .ToList();
+                    var grouped = newSkus
+                     .GroupBy(x => x!.Status)
+                     .ToDictionary(
+                         g => g.Key,
+                         g => g.Select(i => new InventoryItem
+                         {
+                             Id = batchId,
+                             Qty = 0,
+                             Message = i!.Error,
+                             Sku = i!.Sku
+                         }).ToList()
+                     );
 
-            if(items.Count > 0)
-                await _exportRepo.SetStatusBulkAsync(items, ExportStatus.Insert);
+                    foreach (var group in grouped)
+                    {
+                        if (group.Value.Count == 0)
+                            continue;
 
-            if (log.Contains("Import completato"))
+                        await _exportRepo.SetStatusBulkAsync(
+                            group.Value,
+                            group.Key
+                        );
+                    }
+                }
+            }
+
+            Console.WriteLine($"Importati: {status.Imported} / Letti: {status.RowsRead}");
+
+            if (status.Status == "completed" && processedCount >= count)
             {
                 await _batchRepo.CloseAsync(batchId);
                 return;
             }
 
-            await Task.Delay(
-                TimeSpan.FromSeconds(5),
-                token);
+            // 🔥 QUI: 2 SECONDI REALI
+            await Task.Delay(TimeSpan.FromSeconds(2), token);
         }
     }
 
-    private async Task<string> GetImportLogAsync(
+    private async Task<string> GetSkuFileAsync(
         Customer customer,
         string batchId,
         CancellationToken token)
@@ -477,17 +824,53 @@ public class MagentoExporter : IMagentoExporter
 
         client.Connect();
 
-        var logFile = $"var/log/heron/{batchId}.log";
+        var file = $"var/log/heron/{batchId}.sku";
 
         var cmd =
             $"cd {customer.Magento.MagentoRootPath} && " +
-            $"if [ -f {logFile} ]; then tail -50 {logFile}; else echo LOG_NOT_FOUND; fi";
+            $"if [ -f {file} ]; then cat {file}; else echo EMPTY; fi";
 
         var result = client.RunCommand(cmd);
 
         client.Disconnect();
 
         return result.Result;
+    }
+
+    private async Task<ImportStatus> GetImportLogAsync(
+        Customer customer,
+        string batchId,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+
+        using var client = new SshClient(
+            customer.Magento!.FtpHost,
+            customer.Magento.FtpUser,
+            customer.Magento.FtpPassword);
+
+        client.Connect();
+
+        var statusFile = $"var/log/heron/{batchId}.status.json";
+
+        var cmd =
+            $"cd {customer.Magento.MagentoRootPath} && " +
+            $"if [ -f {statusFile} ]; then cat {statusFile}; else echo NOT_FOUND; fi";
+
+        var result = client.RunCommand(cmd);
+
+        client.Disconnect();
+
+        if (result.Result.Contains("NOT_FOUND"))
+            return new ImportStatus() { BatchId = batchId};
+
+        var import = System.Text.Json.JsonSerializer.Deserialize<ImportStatus>(result.Result!,
+            new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            })!;
+
+        return import;
     }
 
     public async Task StopMagentoImportAsync(
@@ -519,17 +902,6 @@ public class MagentoExporter : IMagentoExporter
         await Task.CompletedTask;
     }
 
-    private string Csv(object? value)
-    {
-        if (value == null)
-            return "\"\"";
-
-        var text = value.ToString() ?? "";
-
-        text = text.Replace("\"", "\"\"");
-
-        return $"\"{text}\"";
-    }
     private async Task<string> ZipIfNeededAsync(
     string file,
     CancellationToken token)
@@ -567,12 +939,12 @@ public class MagentoExporter : IMagentoExporter
         );
 
         request.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
+            System.Text.Json.JsonSerializer.Serialize(payload),
             Encoding.UTF8,
             "application/json"
         );
 
-        var j = JsonSerializer.Serialize(payload);
+        var j = System.Text.Json.JsonSerializer.Serialize(payload);
 
         await SendAsync(request, token);
 
@@ -593,7 +965,8 @@ public class MagentoExporter : IMagentoExporter
                     product = BuildMagentoProductWithoutImages(p)
                 });
 
-                var j = JsonSerializer.Serialize(payload);
+                var j = System.Text.Json.JsonSerializer.Serialize(payload);
+
 
                 var req = new HttpRequestMessage(
                     HttpMethod.Post,
@@ -601,7 +974,7 @@ public class MagentoExporter : IMagentoExporter
                 );
 
                 req.Content = new StringContent(
-                    JsonSerializer.Serialize(payload),
+                    System.Text.Json.JsonSerializer.Serialize(payload),
                     Encoding.UTF8,
                     "application/json"
                 );
@@ -686,7 +1059,7 @@ public class MagentoExporter : IMagentoExporter
                 );
 
                 req.Content = new StringContent(
-                    JsonSerializer.Serialize(payload),
+                    System.Text.Json.JsonSerializer.Serialize(payload),
                     Encoding.UTF8,
                     "application/json"
                 );
@@ -723,7 +1096,7 @@ public class MagentoExporter : IMagentoExporter
             );
 
             req.Content = new StringContent(
-                JsonSerializer.Serialize(payload),
+                System.Text.Json.JsonSerializer.Serialize(payload),
                 Encoding.UTF8,
                 "application/json"
             );
@@ -829,7 +1202,7 @@ public class MagentoExporter : IMagentoExporter
                 );
 
                 request.Content = new StringContent(
-                    JsonSerializer.Serialize(payload),
+                    System.Text.Json.JsonSerializer.Serialize(payload),
                     Encoding.UTF8,
                     "application/json"
                 );
@@ -948,7 +1321,7 @@ public class MagentoExporter : IMagentoExporter
         );
 
         req.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
+            System.Text.Json.JsonSerializer.Serialize(payload),
             Encoding.UTF8,
             "application/json"
         );
@@ -1112,7 +1485,7 @@ public class MagentoExporter : IMagentoExporter
         if (!response.IsSuccessStatusCode)
             throw new Exception(body);
 
-        var options = JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body,
+        var options = System.Text.Json.JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
         return options!
@@ -1136,7 +1509,7 @@ public class MagentoExporter : IMagentoExporter
         if (!response.IsSuccessStatusCode)
             throw new Exception(body);
 
-        var options = JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body,
+        var options = System.Text.Json.JsonSerializer.Deserialize<List<MagentoAttributeOption>>(body,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
         return options!;
@@ -1158,7 +1531,7 @@ public class MagentoExporter : IMagentoExporter
         if (!response.IsSuccessStatusCode)
             throw new Exception(json);
 
-        var root = JsonSerializer.Deserialize<MagentoCategory>(json,
+        var root = System.Text.Json.JsonSerializer.Deserialize<MagentoCategory>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
         var map = new Dictionary<string, int>();
@@ -1190,7 +1563,7 @@ public class MagentoExporter : IMagentoExporter
             throw new Exception("children_data non trovato");
 
         // deserializza CORRETTAMENTE
-        var nodes = JsonSerializer.Deserialize<List<CategoryNode>>(
+        var nodes = System.Text.Json.JsonSerializer.Deserialize<List<CategoryNode>>(
             children.GetRawText(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
         );
@@ -1293,7 +1666,7 @@ public class MagentoExporter : IMagentoExporter
                 if (!response.IsSuccessStatusCode)
                     throw new Exception(json);
 
-                var pageResult = JsonSerializer.Deserialize<ProductSearchResult>(json,
+                var pageResult = System.Text.Json.JsonSerializer.Deserialize<ProductSearchResult>(json,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (pageResult.Items == null)
@@ -1410,7 +1783,7 @@ public class MagentoExporter : IMagentoExporter
                 continue;
             else
             {
-                var json = JsonSerializer.Serialize(link);
+                var json = System.Text.Json.JsonSerializer.Serialize(link);
                 using var doc = JsonDocument.Parse(json);
 
                 result = doc.RootElement
@@ -1442,7 +1815,7 @@ public class MagentoExporter : IMagentoExporter
         );
 
         request.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
+            System.Text.Json.JsonSerializer.Serialize(payload),
             Encoding.UTF8,
             "application/json"
         );
@@ -1467,7 +1840,7 @@ public class MagentoExporter : IMagentoExporter
 
         var content = await response.Content.ReadAsStringAsync();
 
-        var mediaEntries = JsonSerializer.Deserialize<List<MagentoMediaEntry>>(content);
+        var mediaEntries = System.Text.Json.JsonSerializer.Deserialize<List<MagentoMediaEntry>>(content);
 
         if (mediaEntries == null || !mediaEntries.Any())
             return;
@@ -1610,7 +1983,7 @@ public class MagentoExporter : IMagentoExporter
         if (nodes == null || !nodes.Any())
             return result;
 
-        var n = JsonSerializer.Serialize(nodes);
+        var n = System.Text.Json.JsonSerializer.Serialize(nodes);
 
         foreach (var node in nodes)
         {

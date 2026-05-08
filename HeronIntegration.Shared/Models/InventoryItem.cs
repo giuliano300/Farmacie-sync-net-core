@@ -10,6 +10,7 @@ namespace HeronIntegration.Shared.Models
     {
         public string Id { get; set; } = default!;
         public string Sku { get; set; } = default!;
+        public string? Message { get; set; } = default!;
         public int Qty { get; set; }
     }
 }

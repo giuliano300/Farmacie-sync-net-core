@@ -9,13 +9,23 @@ public class HeronXmlParser : IHeronXmlParser
     {
         var doc = XDocument.Load(xmlPath);
 
+        var seenSkus = new HashSet<string>();
+
         foreach (var p in doc.Descendants("Prodotto"))
         {
+            var sku = p.Element("CodiceAIC")?.Value?.Trim();
+            // 🔥 SKU vuoto
+            if (string.IsNullOrWhiteSpace(sku))
+                continue;
+
+            // 🔥 DUPLICATO
+            if (!seenSkus.Add(sku))
+                continue;
             yield return new RawProduct
             {
                 CustomerId = customerId,
 
-                Aic = p.Element("CodiceAIC")?.Value!.Trim(),
+                Aic = sku,
                 Name = p.Element("Nome")?.Value!.Trim(),
 
                 Category = p.Element("Categoria")?.Value!,

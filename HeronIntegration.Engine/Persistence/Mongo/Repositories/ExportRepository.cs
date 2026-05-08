@@ -86,20 +86,35 @@ public class ExportRepository : IExportRepository
 
     public async Task SetStatusBulkAsync(List<InventoryItem> items, ExportStatus status)
     {
-        var skus = items.Select(x => x.Sku).ToList();
+        if (items == null || items.Count == 0)
+            return;
+
         var batchId = ObjectId.Parse(items[0].Id);
 
-        var filter = Builders<ExportExecution>.Filter.And(
-            Builders<ExportExecution>.Filter.Eq(x => x.BatchId, batchId),
-            Builders<ExportExecution>.Filter.In(x => x.Aic, skus)
-        );
+        var updates = new List<WriteModel<ExportExecution>>();
 
-        var update = Builders<ExportExecution>.Update
-            .Set(x => x.Status, status)
-            .Set(x => x.LastAttemptAt, DateTime.UtcNow)
-            .Inc(x => x.AttemptCount, 1);
+        foreach (var item in items)
+        {
+            var filter = Builders<ExportExecution>.Filter.And(
+                Builders<ExportExecution>.Filter.Eq(x => x.BatchId, batchId),
+                Builders<ExportExecution>.Filter.Eq(x => x.Aic, item.Sku)
+            );
 
-        await _context.ExportExecutions.UpdateManyAsync(filter, update);
+            var update = Builders<ExportExecution>.Update
+                .Set(x => x.Status, status)
+                .Set(x => x.ErrorMessage, item.Message)
+                .Set(x => x.LastAttemptAt, DateTime.UtcNow)
+                .Inc(x => x.AttemptCount, 1);
+
+            updates.Add(
+                new UpdateOneModel<ExportExecution>(filter, update)
+            );
+        }
+
+        if (updates.Count > 0)
+        {
+            await _context.ExportExecutions.BulkWriteAsync(updates);
+        }
     }
 
     public async Task SetErrorAsync(string id, string aic, string error)

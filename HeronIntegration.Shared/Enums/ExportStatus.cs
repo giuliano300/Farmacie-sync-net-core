@@ -7,5 +7,6 @@ public enum ExportStatus
     UpdatePrice,
     InsertImages,
     Success,
-    Error
+    Error,
+    Update
 }
