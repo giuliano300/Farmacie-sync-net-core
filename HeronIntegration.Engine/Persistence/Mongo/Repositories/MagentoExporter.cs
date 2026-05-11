@@ -17,6 +17,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Policy;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -161,11 +162,12 @@ public class MagentoExporter : IMagentoExporter
     }
 
     // =====================================================
-    // 🔥 REINDEX SU CUSTOM API
+    // 🔥 REINDEX/CRON SU CUSTOM API
     // =====================================================
     public async Task ReindexAsync(
-    List<string> skus,
-    CancellationToken token)
+        List<string> skus,
+        string batchId,
+        CancellationToken token)
     {
         if (
             skus == null ||
@@ -179,6 +181,7 @@ public class MagentoExporter : IMagentoExporter
         {
             var request = new
             {
+                batchId = batchId,
                 skus = skus
             };
 
@@ -212,9 +215,55 @@ public class MagentoExporter : IMagentoExporter
         }
         catch (Exception ex)
         {
-           
+
         }
     }
+
+    // =====================================================
+    // 🔥 POLLING SU CUSTOM API
+    // =====================================================
+    public async Task WaitReindexAsync(string batchId, CancellationToken token)
+    {
+        while (true)
+        {
+            var response =
+                await _http.GetStringAsync(
+                    $"{BaseUrl}/rest/V1/heron/reindex-status/{batchId}",
+                    token
+                );
+
+            Console.WriteLine(response);
+
+            var innerJson =
+                System.Text.Json.JsonSerializer.Deserialize<string>(response);
+
+            var result =
+                System.Text.Json.JsonSerializer.Deserialize<ReindexStatus>(
+                    innerJson,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    }
+                );
+
+            if (result != null)
+            {
+                Console.WriteLine(
+                    $"{result.Percent}%"
+                );
+
+                if (!result.Running)
+                {
+                    break;
+                }
+            }
+
+            await Task.Delay(
+                5000
+            );
+        }
+    }
+
 
     // =====================================================
     // 🔥 UPSERT PRODOTTO API CUSTOM
@@ -1060,11 +1109,12 @@ public class MagentoExporter : IMagentoExporter
     }
 
     public async Task ReindexAllAsync(
-    List<ResolvedProduct> products, CancellationToken token)
+    List<ResolvedProduct> products, string batchId, CancellationToken token)
     {
 
         await ReindexAsync(
             products.Select(a=>a.Aic).ToList(),
+            batchId,
             token
         );
     }

@@ -152,7 +152,9 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                await exporter.ReindexAllAsync(toUpsert, token);
+                await exporter.ReindexAsync(toUpsert.Select(a => a.Aic).ToList(), batchId, token);
+
+                await exporter.WaitReindexAsync(batchId, token);
 
                 await _batchFinalizer.FinalizeBatchAsync(batchId);
             }

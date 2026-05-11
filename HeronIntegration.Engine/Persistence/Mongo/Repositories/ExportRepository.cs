@@ -181,8 +181,6 @@ public class ExportRepository : IExportRepository
         tot = total.Count();
 
         var batch = await _context.BatchExecutions.Find(a => a.Id == ObjectId.Parse(batchId)).FirstAsync();
-        if (batch.type < TypeRun.UpdatePrezzi)
-            tot = (int)batch.totalMagentoProducts!;
 
         var success = total.Count(a => a.Status == ExportStatus.Success);
 

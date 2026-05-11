@@ -24,6 +24,7 @@ namespace HeronIntegration.Shared.Models
         public StepMetrics Farmadati { get; set; } = new();
         public StepMetrics Suppliers { get; set; } = new();
         public StepMetricsMagento Magento { get; set; } = new();
+        public ReindexStatus ReindexValues { get; set; } = new();
     }
 
     public class StepMetrics

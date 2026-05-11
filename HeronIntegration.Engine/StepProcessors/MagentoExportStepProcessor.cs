@@ -97,10 +97,12 @@ public class MagentoExportStepProcessor : IStepProcessor
             }
 
             if (skus.Count() > 0)
-                await exporter.ReindexAsync(skus, token);
+            {
+                await exporter.ReindexAsync(skus, batchId, token);
+                await exporter.WaitReindexAsync(batchId, token);
+            }
 
-            // 🔹 CRON + FINALIZE
-            //await exporter.RunMagentoCronAsync(token);
+            // FINALIZE
             await _batchFinalizer.FinalizeBatchAsync(batchId);
             //await exporter.StopMagentoImportAsync(batchId);
 

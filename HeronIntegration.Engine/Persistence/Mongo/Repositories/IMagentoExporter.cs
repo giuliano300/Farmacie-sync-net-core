@@ -14,7 +14,7 @@ public interface IMagentoExporter
     // 🔹 Import massivo ottimizzato (NUOVO - non rompe nulla)
     Task ImportProductsAsync(IEnumerable<ResolvedProduct> products, CancellationToken token);
 
-    Task ReindexAllAsync(List<ResolvedProduct> products, CancellationToken token);
+    Task ReindexAllAsync(List<ResolvedProduct> products, string batchId, CancellationToken token);
 
     // 🔹 Attributi e categorie
     Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode, CancellationToken token);
@@ -34,7 +34,9 @@ public interface IMagentoExporter
 
     int? ResolveCategoryId(Dictionary<string, int> categoryMap, string categoryName, CancellationToken token);
 
-    Task ReindexAsync(List<string> skus, CancellationToken token);
+    Task ReindexAsync(List<string> skus, string batchId, CancellationToken token);
+
+    Task WaitReindexAsync(string batchId, CancellationToken token);
     Task<List<CategoryNode>> GetCategoryAsync(CancellationToken token);
 
     List<CustomerMagentoCategories> FlattenCategoriesNodes(
