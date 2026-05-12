@@ -99,11 +99,11 @@ public class BatchReportController : ControllerBase
             if (customer?.Magento == null)
                 throw new Exception("Magento config mancante");
 
-            var exporter = _magentoExporterFactory.Create(customer.Magento);
+            //var exporter = _magentoExporterFactory.Create(customer.Magento);
             await _batchManagerService.DeleteAsync(id);
-            await exporter.DeleteProducts();
-            await exporter.CleanIndex(token);
-            await exporter.CleanCache(token);
+            //await exporter.DeleteProducts();
+            //await exporter.CleanIndex(token);
+            //await exporter.CleanCache(token);
 
             return true;
         }
