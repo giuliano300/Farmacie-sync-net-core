@@ -37,6 +37,9 @@ public interface IMagentoExporter
     Task ReindexAsync(List<string> skus, string batchId, CancellationToken token);
 
     Task WaitReindexAsync(string batchId, CancellationToken token);
+    Task CleanIndex(CancellationToken token);
+    Task CleanCache(CancellationToken token);
+    Task DeleteProducts();
     Task<List<CategoryNode>> GetCategoryAsync(CancellationToken token);
 
     List<CustomerMagentoCategories> FlattenCategoriesNodes(

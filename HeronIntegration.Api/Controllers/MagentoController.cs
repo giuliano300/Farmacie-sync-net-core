@@ -152,9 +152,14 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                await exporter.ReindexAsync(toUpsert.Select(a => a.Aic).ToList(), batchId, token);
 
-                await exporter.WaitReindexAsync(batchId, token);
+                if(toUpsert.Any())
+                {
+                    await exporter.ReindexAsync(toUpsert.Select(a => a.Aic).ToList(), batchId, token);
+                    await exporter.WaitReindexAsync(batchId, token);
+                    await exporter.CleanIndex(token);
+                    await exporter.CleanCache(token);
+                }
 
                 await _batchFinalizer.FinalizeBatchAsync(batchId);
             }
@@ -310,7 +315,7 @@ public class MagentoController : ControllerBase
     [HttpGet("finalizeBatchAsync")]
     public async Task<IActionResult> FinalizeBatchAsync(string batchId)
     {
-        var token = _processManager.Start(ProcessType.Batch,batchId);
+        var token = _processManager.Start(ProcessType.Batch, batchId);
 
         _ = Task.Run(async () =>
         {
@@ -319,5 +324,64 @@ public class MagentoController : ControllerBase
         }, token);
 
         return Ok("Batch finalizzato");
+    }
+
+    //--------------------------------------------------
+    // CLEAN INDEX
+    //--------------------------------------------------
+
+    [HttpGet("CleanIndex")]
+    public async Task<IActionResult> CleanIndex(string batchId)
+    {
+        var token = _processManager.Start(ProcessType.Batch, batchId);
+
+        var batch = await _batchRepo.GetByIdAsync(batchId);
+        var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+        if (customer?.Magento == null)
+            throw new Exception("Magento config mancante");
+
+        var exporter = _magentoExporterFactory.Create(customer.Magento);
+        await exporter.CleanIndex(token);
+
+        return Ok("Indici puliti");
+    }
+
+    //--------------------------------------------------
+    // CLEAN CACHE
+    //--------------------------------------------------
+
+    [HttpGet("CleanCache")]
+    public async Task<IActionResult> CleanCache(string batchId)
+    {
+        var token = _processManager.Start(ProcessType.Batch, batchId);
+
+        var batch = await _batchRepo.GetByIdAsync(batchId);
+        var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+        if (customer?.Magento == null)
+            throw new Exception("Magento config mancante");
+
+        var exporter = _magentoExporterFactory.Create(customer.Magento);
+        await exporter.CleanCache(token);
+
+        return Ok("Cache pulita");
+    }
+    //--------------------------------------------------
+    // DELETE PRODUCTS
+    //--------------------------------------------------
+
+    [HttpGet("DeleteProducts")]
+    public async Task<IActionResult> DeleteProducts(string customerId)
+    {
+        var customer = await _customerRepo.GetByIdAsync(customerId);
+
+        if (customer?.Magento == null)
+            throw new Exception("Magento config mancante");
+
+        var exporter = _magentoExporterFactory.Create(customer.Magento);
+        await exporter.DeleteProducts();
+
+        return Ok("Prodotti Eliminati");
     }
 }

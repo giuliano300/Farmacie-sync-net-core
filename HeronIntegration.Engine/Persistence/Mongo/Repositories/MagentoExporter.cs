@@ -259,9 +259,52 @@ public class MagentoExporter : IMagentoExporter
             }
 
             await Task.Delay(
-                5000
+                2000
             );
         }
+    }
+
+    // =====================================================
+    // 🔥 CLEAN INDEX SU CUSTOM API
+    // =====================================================
+    public async Task CleanIndex(CancellationToken token)
+    {
+        var response =
+            await _http.PostAsync(
+                $"{BaseUrl}/rest/V1/heron/clean-index",
+                null,
+                token
+            );
+
+        Console.WriteLine(response);
+    }
+
+    // =====================================================
+    // 🔥 CLEAN CACHE SU CUSTOM API
+    // =====================================================
+    public async Task CleanCache(CancellationToken token)
+    {
+        var response =
+            await _http.PostAsync(
+                $"{BaseUrl}/rest/V1/heron/clean-cache",
+                null,
+                token
+            );
+
+        Console.WriteLine(response);
+    }
+
+    // =====================================================
+    // 🔥 ELIMINA TUTTI I PRODOTTI SU CUSTOM API
+    // =====================================================
+    public async Task DeleteProducts()
+    {
+        var response =
+            await _http.PostAsync(
+                $"{BaseUrl}/rest/V1/heron/delete-products", null
+            );
+
+        Console.WriteLine(response);
     }
 
 

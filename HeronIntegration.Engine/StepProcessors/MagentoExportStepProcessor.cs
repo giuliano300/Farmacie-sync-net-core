@@ -100,6 +100,8 @@ public class MagentoExportStepProcessor : IStepProcessor
             {
                 await exporter.ReindexAsync(skus, batchId, token);
                 await exporter.WaitReindexAsync(batchId, token);
+                await exporter.CleanIndex(token);
+                await exporter.CleanCache(token);
             }
 
             // FINALIZE

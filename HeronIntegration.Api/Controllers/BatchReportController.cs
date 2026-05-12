@@ -1,9 +1,11 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using HeronIntegration.Engine.Persistence.Mongo;
+using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
+using Newtonsoft.Json.Linq;
 
 [ApiController]
 [Route("api/batches-report")]
@@ -12,15 +14,24 @@ public class BatchReportController : ControllerBase
     private readonly IBatchReportRepository _batchRepoReport;
     private readonly IBatchRepository _batchRepo;
     private readonly IBatchManagerService _batchManagerService;
+    private readonly IMagentoExporterFactory _magentoExporterFactory;
+    private readonly ICustomerRepository _customerRepo;
+    private readonly BatchProcessManager _processManager;
     public BatchReportController(
         IBatchReportRepository batchRepoReport,
         IBatchRepository batchRepo,
-        IBatchManagerService batchManagerService
-        )
+        IBatchManagerService batchManagerService,
+        ICustomerRepository customerRepo,
+        IMagentoExporterFactory magentoExporterFactory,
+        BatchProcessManager processManager
+    )
     {
         _batchRepoReport = batchRepoReport;
         _batchRepo = batchRepo;
         _batchManagerService = batchManagerService;
+        _customerRepo = customerRepo;
+        _magentoExporterFactory = magentoExporterFactory;
+        _processManager = processManager;
     }
 
     [HttpGet]
@@ -81,7 +92,19 @@ public class BatchReportController : ControllerBase
     {
         try
         {
+            var token = _processManager.Start(ProcessType.Batch, id);
+            var batch = await _batchRepo.GetByIdAsync(id);
+            var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+
+            if (customer?.Magento == null)
+                throw new Exception("Magento config mancante");
+
+            var exporter = _magentoExporterFactory.Create(customer.Magento);
             await _batchManagerService.DeleteAsync(id);
+            await exporter.DeleteProducts();
+            await exporter.CleanIndex(token);
+            await exporter.CleanCache(token);
+
             return true;
         }
         catch (Exception e)
