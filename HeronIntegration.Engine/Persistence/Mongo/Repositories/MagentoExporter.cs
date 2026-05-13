@@ -95,8 +95,6 @@ public class MagentoExporter : IMagentoExporter
         {
             var l = products.ToList();
 
-            var img = System.Text.Json.JsonSerializer.Serialize(l[0].Images);
-
             var batchId = l[0].BatchId.ToString();
             var b = await _batchRepo.GetByIdAsync(batchId);
             if (b == null)
@@ -543,6 +541,8 @@ public class MagentoExporter : IMagentoExporter
             manufacturer = Convert.ToInt32(x.Producer),
 
             supplier = x.SupplierCode!,
+
+            weight = x.Weight,
 
             website_ids = new List<int>
             {

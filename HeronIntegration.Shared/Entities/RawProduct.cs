@@ -24,6 +24,7 @@ public class RawProduct
     public decimal Price { get; set; }
 
     public decimal OriginalPrice { get; set; }
+    public decimal Weight { get; set; }
 
     public int Stock { get; set; }
 

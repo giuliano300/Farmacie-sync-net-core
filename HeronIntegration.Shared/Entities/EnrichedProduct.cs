@@ -31,6 +31,7 @@ public class EnrichedProduct
     public string? Source { get; set; }
     public decimal HeronPrice { get; set; }
     public decimal OriginalPrice { get; set; }
+    public decimal Weight { get; set; }
     public int HeronStock { get; set; }
 
 
@@ -60,6 +61,8 @@ public class EnrichedProduct
 
             HeronPrice = raw.Price,
             HeronStock = raw.Stock,
+
+            Weight = raw.Weight,
 
             OriginalPrice = raw.OriginalPrice,
 
@@ -95,6 +98,7 @@ public class EnrichedProduct
                 OriginalPrice = raw.OriginalPrice,
                 HeronStock = raw.Stock,
                 CreatedAt = DateTime.UtcNow,
+                Weight = raw.Weight,
                 Source = "CACHE"
             };
         }

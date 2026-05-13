@@ -174,7 +174,8 @@ public class HeronImportStepProcessor : IStepProcessor
                     MagentoCategoryId = magentoCategoryId,
                     Producer = producer,
                     Category = p.Category,
-                    SubCategory = p.SubCategory
+                    SubCategory = p.SubCategory,
+                    Weight = p.Weight
                 });
 
                 exportRows.Add(new ExportExecution

@@ -31,6 +31,7 @@ public class ResolvedProduct
     public string? Source { get; set; }
     public decimal Price { get; set; }
     public decimal OriginalPrice { get; set; }
+    public decimal Weight { get; set; }
     public int Availability { get; set; }
 
     public string? SupplierCode { get; set; }
@@ -65,6 +66,7 @@ public class ResolvedProduct
             Availability = chosen.Availability,
             SupplierCode = chosen.SupplierCode,
             Images = raw.Images,
+            Weight = raw.Weight,
             ResolvedAt = DateTime.UtcNow
         };
     }

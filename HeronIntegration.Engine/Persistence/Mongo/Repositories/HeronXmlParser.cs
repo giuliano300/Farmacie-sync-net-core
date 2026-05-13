@@ -11,9 +11,11 @@ public class HeronXmlParser : IHeronXmlParser
 
         var seenSkus = new HashSet<string>();
 
+
         foreach (var p in doc.Descendants("Prodotto"))
-        {
+        {   
             var sku = p.Element("CodiceAIC")?.Value?.Trim();
+
             // 🔥 SKU vuoto
             if (string.IsNullOrWhiteSpace(sku))
                 continue;
@@ -21,6 +23,8 @@ public class HeronXmlParser : IHeronXmlParser
             // 🔥 DUPLICATO
             if (!seenSkus.Add(sku))
                 continue;
+
+
             yield return new RawProduct
             {
                 CustomerId = customerId,
@@ -40,7 +44,9 @@ public class HeronXmlParser : IHeronXmlParser
                 AtcGmp = p.Element("ATC_GMP")?.Value,
                 Producer = p.Element("Produttore")?.Value!,
 
-                Published = ParseBool(p.Element("Pubblicato")?.Value)
+                Published = ParseBool(p.Element("Pubblicato")?.Value),
+
+                Weight = ParseDecimal(p.Element("Peso")?.Value)
             };
         }
     }

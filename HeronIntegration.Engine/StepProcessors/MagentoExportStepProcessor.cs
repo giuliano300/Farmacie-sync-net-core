@@ -136,6 +136,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             SupplierCode = p.SupplierCode,
             Producer = p.Producer,
             SubCategory = p.SubCategory,
+            Weight = p.Weight,
             Images = p.Images
         }).ToList();
     }
@@ -173,6 +174,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                                     : "0",
                 SubCategory = p.SubCategory,
                 MagentoCategoryId = p.MagentoCategoryId,
+                Weight = p.Weight,
                 Images = p.Images
             };
         }).ToList();

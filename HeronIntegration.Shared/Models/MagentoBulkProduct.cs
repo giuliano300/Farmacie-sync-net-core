@@ -19,6 +19,7 @@ namespace HeronIntegration.Shared.Models
         public decimal price { get; set; }
 
         public decimal special_price { get; set; }
+        public decimal weight { get; set; }
 
         public int qty { get; set; }
 
