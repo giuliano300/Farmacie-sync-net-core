@@ -13,6 +13,7 @@ public interface IExportRepository
     Task InsertManyAsync(IEnumerable<ExportExecution> exports);
 
     Task<List<ExportExecution>> GetPendingAsync(string batchId, int take);
+    Task<List<ExportExecution>> GetFromBatch(string batchId);
 
     Task SetSuccessAsync(string batchId, string aic);
 

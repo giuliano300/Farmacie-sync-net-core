@@ -16,5 +16,15 @@ namespace HeronIntegration.Shared.Entities
         public int InsertImages { get; set; }
         public int Complete { get; set; }
         public int Errors { get; set; }
+
+        public List<ProductReport>? reportProducts { get; set; }
+    }
+
+    public class ProductReport()
+    {
+        public string? Aic { get; set; }
+        public string? Status { get; set; }
+
+        public string? Message { get; set; }
     }
 }

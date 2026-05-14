@@ -1,4 +1,5 @@
-﻿using System;
+﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -42,10 +43,12 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
         {
             var report = await _exportRepo.BuildBatchReportAsync(batchId);
 
+            var batchExecutions = await _exportRepo.GetByBatchAsync(batchId);
+
             await _batchRepo.CloseAsync(batchId);
             await _exportRepo.DeleteByBatchAsync(batchId);
 
-            await _reportService.SaveBatchReportAsync(report);
+            await _reportService.SaveBatchReportAsync(report, batchExecutions);
 
             await _rawRepo.DeleteByBatchAsync(batchId);
             await _enrichedRepo.DeleteByBatchAsync(batchId);

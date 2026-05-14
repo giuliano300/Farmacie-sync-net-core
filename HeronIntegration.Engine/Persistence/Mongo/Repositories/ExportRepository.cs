@@ -19,6 +19,13 @@ public class ExportRepository : IExportRepository
         _batchReport = batchReport;
     }
 
+    public async Task<List<ExportExecution>> GetFromBatch(string batchId)
+    {
+        return await _context.ExportExecutions
+            .Find(a=>a.BatchId == ObjectId.Parse(batchId))
+            .ToListAsync();
+    }
+
     public async Task InsertManyAsync(IEnumerable<ExportExecution> exports)
     {
         await _context.ExportExecutions.InsertManyAsync(exports);
