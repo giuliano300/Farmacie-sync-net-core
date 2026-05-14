@@ -53,6 +53,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
             await _rawRepo.DeleteByBatchAsync(batchId);
             await _enrichedRepo.DeleteByBatchAsync(batchId);
             await _resolvedRepo.DeleteByBatchAsync(batchId);
+            await _enrichedRepo.DeleteByBatchAsync(batchId);
 
 
             var batch = await _batchRepo.GetByIdAsync(batchId);
