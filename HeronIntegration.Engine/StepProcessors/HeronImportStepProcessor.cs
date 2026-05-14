@@ -161,21 +161,25 @@ public class HeronImportStepProcessor : IStepProcessor
                         ? mappedProducer
                         : p.Producer;
 
+                var price = GetPrice(p.Price, customer.IvaInclusive, p.Vat);
+                var originalPrice = GetPrice(p.OriginalPrice, customer.IvaInclusive, p.Vat);
+
                 rawProducts.Add(new RawProduct
                 {
                     BatchId = batch.Id,
                     CustomerId = batch.CustomerId,
                     Aic = p.Aic,
                     Name = p.Name,
-                    Price = p.Price,
-                    OriginalPrice = p.OriginalPrice,
+                    Price = price,
+                    OriginalPrice = originalPrice,
                     Stock = p.Stock,
                     CreatedAt = DateTime.UtcNow,
                     MagentoCategoryId = magentoCategoryId,
                     Producer = producer,
                     Category = p.Category,
                     SubCategory = p.SubCategory,
-                    Weight = p.Weight
+                    Weight = p.Weight,
+                    Vat = p.Vat
                 });
 
                 exportRows.Add(new ExportExecution
@@ -208,5 +212,24 @@ public class HeronImportStepProcessor : IStepProcessor
         result.FinishedAt = DateTime.UtcNow;
 
         return result;
+    }
+
+    public decimal GetPrice(decimal price, bool ivaInclusive, decimal ivaPercent)
+    {
+        if (!ivaInclusive)
+        {
+            // Nessuna IVA da scorporare
+            if (ivaPercent <= 0)
+            {
+                return price;
+            }
+
+            return Math.Round(
+                price / (1 + (ivaPercent / 100m)),
+                2
+            );
+        }
+
+        return price;
     }
 }

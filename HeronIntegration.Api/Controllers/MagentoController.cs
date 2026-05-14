@@ -92,6 +92,8 @@ public class MagentoController : ControllerBase
                     Aic = p.Aic,
                     Name = p.Name,
                     Price = p.Price,
+                    OriginalPrice = p.OriginalPrice,
+                    Vat = p.Vat,
                     Availability = p.Availability,
                     LongDescription = p.LongDescription,
                     ShortDescription = p.ShortDescription,

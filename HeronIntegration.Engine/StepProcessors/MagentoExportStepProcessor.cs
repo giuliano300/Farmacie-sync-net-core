@@ -137,7 +137,8 @@ public class MagentoExportStepProcessor : IStepProcessor
             Producer = p.Producer,
             SubCategory = p.SubCategory,
             Weight = p.Weight,
-            Images = p.Images
+            Images = p.Images,
+            Vat = p.Vat
         }).ToList();
     }
 
@@ -161,6 +162,8 @@ public class MagentoExportStepProcessor : IStepProcessor
                 Aic = p.Aic,
                 Name = p.Name,
                 Price = p.Price,
+                OriginalPrice = p.OriginalPrice,
+                Vat = p.Vat,
                 Availability = p.Availability,
                 LongDescription = p.LongDescription,
                 ShortDescription = p.ShortDescription,

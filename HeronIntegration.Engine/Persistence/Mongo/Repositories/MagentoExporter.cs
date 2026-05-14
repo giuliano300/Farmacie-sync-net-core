@@ -543,6 +543,8 @@ public class MagentoExporter : IMagentoExporter
             supplier = x.SupplierCode!,
 
             weight = x.Weight,
+            
+            vat = x.Vat,
 
             website_ids = new List<int>
             {

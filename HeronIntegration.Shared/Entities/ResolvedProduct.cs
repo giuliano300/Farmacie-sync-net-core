@@ -33,6 +33,7 @@ public class ResolvedProduct
     public decimal OriginalPrice { get; set; }
     public decimal Weight { get; set; }
     public int Availability { get; set; }
+    public int Vat { get; set; }
 
     public string? SupplierCode { get; set; }
 
@@ -67,6 +68,7 @@ public class ResolvedProduct
             SupplierCode = chosen.SupplierCode,
             Images = raw.Images,
             Weight = raw.Weight,
+            Vat = raw.Vat,
             ResolvedAt = DateTime.UtcNow
         };
     }

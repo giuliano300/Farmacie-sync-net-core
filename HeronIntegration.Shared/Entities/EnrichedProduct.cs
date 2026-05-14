@@ -33,6 +33,7 @@ public class EnrichedProduct
     public decimal OriginalPrice { get; set; }
     public decimal Weight { get; set; }
     public int HeronStock { get; set; }
+    public int Vat { get; set; }
 
 
     public List<ProductImage> Images { get; set; } = new();
@@ -66,6 +67,8 @@ public class EnrichedProduct
 
             OriginalPrice = raw.OriginalPrice,
 
+            Vat = raw.Vat,
+
             CachedAt = DateTime.UtcNow,
 
             CreatedAt = DateTime.UtcNow
@@ -92,6 +95,8 @@ public class EnrichedProduct
                 SubCategory = raw.SubCategory,
                 MagentoCategoryId = raw.MagentoCategoryId,
                 Producer = raw.Producer,
+
+                Vat = raw.Vat,
 
                 Images = cache.Images ?? new List<ProductImage>(),
                 HeronPrice = raw.Price,

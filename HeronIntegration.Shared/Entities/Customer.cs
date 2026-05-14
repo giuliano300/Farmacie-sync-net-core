@@ -23,6 +23,7 @@ public class Customer
 
     public bool Active { get; set; } = true;
     public bool Msi { get; set; } = true;
+    public bool IvaInclusive { get; set; } = false;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     
