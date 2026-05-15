@@ -20,7 +20,7 @@ public class CompositeProductBaseInfoProvider : IProductBaseInfoProvider
         {
             var info = await provider.GetBaseInfoAsync(productCode);
             if (info != null && info.error != true)
-                return info;
+              return info;
         }
 
         return null;

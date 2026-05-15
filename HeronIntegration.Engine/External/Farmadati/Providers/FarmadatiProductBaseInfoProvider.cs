@@ -23,7 +23,7 @@ public class FarmadatiProductBaseInfoProvider : IProductBaseInfoProvider
             result = await FarmadatiHelper.ExecuteWithRetry(() =>
             _client.ExecuteQueryAsync(
                 "TE002",
-                new[] { "FDI_0001", "FDI_0004" },
+                new[] { "FDI_0001", "FDI_0004", "FDI_0008" },
                 new[]
                 {
                 new Filter
@@ -65,6 +65,7 @@ public class FarmadatiProductBaseInfoProvider : IProductBaseInfoProvider
 
         var code = productNode.Element("FDI_0001")?.Value;
         var name = productNode.Element("FDI_0004")?.Value;
+        var macroGroup = productNode.Element("FDI_0008")?.Value;
 
         if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(name))
             return null;
@@ -74,7 +75,8 @@ public class FarmadatiProductBaseInfoProvider : IProductBaseInfoProvider
             ProductCode = code,
             Name = name,
             ShortDescription = name,
-            error = false
+            error = false,
+            ProductTypeCode = macroGroup
         };
     }
 }

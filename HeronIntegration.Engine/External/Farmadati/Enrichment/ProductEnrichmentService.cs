@@ -40,7 +40,8 @@ public class ProductEnrichmentService : IProductEnrichmentService
             ShortDescription = baseData.ShortDescription,
             LongDescription = longDesc,
             Images = imgs.ToList() ?? new List<ProductImage>(),
-            CachedAt = DateTime.UtcNow
+            CachedAt = DateTime.UtcNow,
+            MacroGroup = baseData.ProductTypeCode
         };
     }
 }

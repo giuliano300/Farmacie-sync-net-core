@@ -68,10 +68,10 @@ builder.Services.AddScoped<IProductBaseInfoProvider>(sp =>
 {
     var providers = new IProductBaseInfoProvider[]
     {
-        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE003>(),
         sp.GetRequiredService<FarmadatiProductBaseInfoProvider>(),
+        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE003>(),
         sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE001>(),
-        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE006>()
+        sp.GetRequiredService<FarmadatiProductBaseInfoProvider_TE006>(),
     };
 
     return new CompositeProductBaseInfoProvider(providers);

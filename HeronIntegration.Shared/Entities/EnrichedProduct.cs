@@ -35,6 +35,7 @@ public class EnrichedProduct
     public int HeronStock { get; set; }
     public int Vat { get; set; }
 
+    public string? MacroGroup { get; set; }
 
     public List<ProductImage> Images { get; set; } = new();
 
