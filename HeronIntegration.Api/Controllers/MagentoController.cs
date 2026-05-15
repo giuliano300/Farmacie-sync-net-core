@@ -4,6 +4,7 @@ using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
 using System.Collections.Concurrent;
 
 [ApiController]
@@ -385,5 +386,28 @@ public class MagentoController : ControllerBase
         await exporter.DeleteProducts();
 
         return Ok("Prodotti Eliminati");
+    }
+
+    [HttpGet("TestUploadImage")]
+    public async Task<IActionResult> TestUploadImage(string customerId, string sku)
+    {
+        var customer = await _customerRepo.GetByIdAsync(customerId);
+
+        if (customer?.Magento == null)
+            throw new Exception("Magento config mancante");
+
+        var exporter = _magentoExporterFactory.Create(customer.Magento);
+
+        var p = new ProductImage()
+        {
+            GridFsId = ObjectId.Parse("69942f6ee05377b81d2c385c"),
+            MimeType = "image/png",
+            Type = "gallery",
+            AltText = "1.jpg"
+        };
+
+        await exporter.UploadImageNewAsync(p, sku, "001", customer, new CancellationToken());
+
+        return Ok("Immagine caricata");
     }
 }

@@ -5,11 +5,7 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
-using MongoDB.Bson.IO;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using Renci.SshNet;
-using SharpCompress.Common;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO.Compression;
@@ -17,11 +13,11 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
-using System.Security.Policy;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
+using MongoDB.Driver.GridFS;
 
 public class MagentoExporter : IMagentoExporter
 {
@@ -33,6 +29,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly IHostEnvironment _env;
     private readonly ICustomerRepository _customerRepo;
     private readonly ICustomerMagentoCategoriesRepository _customerMagentoCategoriesRepository;
+    private readonly GridFSBucket _gridFsBucket;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
 
     private const int MaxParallel = 20;
@@ -257,7 +254,81 @@ public class MagentoExporter : IMagentoExporter
             }
 
             await Task.Delay(
-                2000
+                2000,
+                token
+            );
+        }
+    }
+
+    // =====================================================
+    // 🔥 POLLING IMMAGINI SU CUSTOM API
+    // =====================================================
+    public async Task WaitPollingImagesAsync(string batchId, CancellationToken token)
+    {
+        int processedCount = 0;
+
+        while (true)
+        {
+            var response =
+                await _http.GetStringAsync(
+                    $"{BaseUrl}/rest/V1/heron/images-status/{batchId}",
+                    token
+                );
+
+            Console.WriteLine(response);
+
+            var innerJson =
+                System.Text.Json.JsonSerializer.Deserialize<string>(response);
+
+            var result =
+                System.Text.Json.JsonSerializer.Deserialize<ImagesImportStatus>(
+                    innerJson,
+                    new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    }
+                );
+            var allSkus = result!.Inserted;
+
+            var newSkus = allSkus.Skip(processedCount).ToList();
+            processedCount = allSkus.Count;
+
+            if (newSkus.Count > 0)
+            {
+                var l = new List<InventoryItem>();
+                foreach (var s in newSkus)
+                {
+                    var i = new InventoryItem()
+                    {
+                        Id = batchId,
+                        Qty = 0,
+                        Message = "Inserimento riuscito",
+                        Sku = s
+                    };
+                    l.Add(i);
+                }
+                await _exportRepo.SetStatusBulkAsync(
+                    l,
+                    ExportStatus.InsertImages
+                );
+            }
+
+
+            if (result != null)
+            {
+                Console.WriteLine(
+                    $"{result.Percent}%"
+                );
+
+                if (!result.Running && result.Percent == 100)
+                {
+                    break;
+                }
+            }
+
+            await Task.Delay(
+                2000,
+                token
             );
         }
     }
@@ -806,13 +877,14 @@ public class MagentoExporter : IMagentoExporter
     private async Task UploadFtpAsync(
     string localFile,
     Customer customer,
-    CancellationToken token)
+    CancellationToken token, 
+    string rm = "/var/import")
     {
         var host = customer.Magento!.FtpHost;
         var user = customer.Magento.FtpUser;
         var pass = customer.Magento.FtpPassword;
         var remoteFolder =
-                customer.Magento.MagentoRootPath.TrimEnd('/') + "/var/import";
+                customer.Magento.MagentoRootPath.TrimEnd('/') + rm;
 
         var remoteFile =
             remoteFolder + "/" + Path.GetFileName(localFile);
@@ -1451,7 +1523,256 @@ public class MagentoExporter : IMagentoExporter
 
     }
 
+    // =====================================================
+    // 🔥 UPLOAD IMMAGINI NELLA CARTELLA FTP
+    // =====================================================
+    public async Task<string?> ImportImagesToFtpBulkAsync(
+        List<ResolvedProduct> products,
+        Customer customer,
+        CancellationToken token)
+    {
+        try
+        {
+            /*
+            |--------------------------------------------------------------------------
+            | VALIDATION
+            |--------------------------------------------------------------------------
+            */
 
+            if (
+                products == null ||
+                !products.Any())
+            {
+                return null;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | BATCH ID
+            |--------------------------------------------------------------------------
+            */
+
+            var batchId =
+                products.First().BatchId.ToString();
+
+            /*
+            |--------------------------------------------------------------------------
+            | TEMP ROOT
+            |--------------------------------------------------------------------------
+            */
+
+            var tempRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "temp-zip");
+
+            if (!Directory.Exists(tempRoot))
+            {
+                Directory.CreateDirectory(tempRoot);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | ZIP PATH
+            |--------------------------------------------------------------------------
+            */
+
+            var zipPath =
+                Path.Combine(
+                    tempRoot,
+                    $"{batchId}.zip");
+
+            /*
+            |--------------------------------------------------------------------------
+            | DELETE OLD ZIP
+            |--------------------------------------------------------------------------
+            */
+
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | PAYLOAD
+            |--------------------------------------------------------------------------
+            */
+
+            var payload =
+                new List<object>();
+
+            /*
+            |--------------------------------------------------------------------------
+            | CREATE ZIP
+            |--------------------------------------------------------------------------
+            */
+
+            await using (
+                var zipFileStream =
+                    new FileStream(
+                        zipPath,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None,
+                        1024 * 1024,
+                        FileOptions.Asynchronous |
+                        FileOptions.SequentialScan))
+            {
+                using (
+                    var archive =
+                        new ZipArchive(
+                            zipFileStream,
+                            ZipArchiveMode.Create,
+                            true))
+                {
+                    /*
+                    |--------------------------------------------------------------------------
+                    | PRODUCTS
+                    |--------------------------------------------------------------------------
+                    */
+
+                    foreach (var product in products)
+                    {
+                        try
+                        {
+                            if (
+                                product.Images == null ||
+                                !product.Images.Any())
+                            {
+                                continue;
+                            }
+
+                            var imageNames =
+                                new List<string>();
+
+                            int index = 1;
+
+                            /*
+                            |--------------------------------------------------------------------------
+                            | IMAGES
+                            |--------------------------------------------------------------------------
+                            */
+
+                            foreach (var image in product.Images)
+                            {
+                                try
+                                {
+                                    if (image.GridFsId == null)
+                                    {
+                                        continue;
+                                    }
+
+                                    /*
+                                    |--------------------------------------------------------------------------
+                                    | FILE NAME
+                                    |--------------------------------------------------------------------------
+                                    */
+
+                                    var extension =
+                                        GetExtension(
+                                            image.MimeType);
+
+                                    var fileName =
+                                        $"{product.Aic}_{index}{extension}";
+
+                                    /*
+                                    |--------------------------------------------------------------------------
+                                    | ZIP ENTRY
+                                    |--------------------------------------------------------------------------
+                                    */
+
+                                    var entry =
+                                        archive.CreateEntry(
+                                            fileName,
+                                            CompressionLevel.NoCompression);
+
+                                    /*
+                                    |--------------------------------------------------------------------------
+                                    | GRIDFS -> ZIP STREAM
+                                    |--------------------------------------------------------------------------
+                                    */
+
+                                    await using var entryStream =
+                                        entry.Open();
+
+                                    await _imageStorage.CopyToAsync(
+                                        image.GridFsId.Value,
+                                        entryStream,
+                                        token);
+
+                                    imageNames.Add(fileName);
+
+                                    index++;
+                                }
+                                catch
+                                {
+                                }
+                            }
+
+                            /*
+                            |--------------------------------------------------------------------------
+                            | PRODUCT PAYLOAD
+                            |--------------------------------------------------------------------------
+                            */
+
+                            if (imageNames.Any())
+                            {
+                                payload.Add(
+                                    new
+                                    {
+                                        sku = product.Aic,
+                                        images = imageNames
+                                    });
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
+                await zipFileStream.FlushAsync(token);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | FTP UPLOAD
+            |--------------------------------------------------------------------------
+            */
+
+            await UploadFtpAsync(
+                zipPath,
+                customer,
+                token,
+                "/var/import/images");
+
+            /*
+            |--------------------------------------------------------------------------
+            | API
+            |--------------------------------------------------------------------------
+            */
+
+            await _http.PostAsync(
+                $"{BaseUrl}/rest/V1/heron/images-local/{batchId}",
+                null,
+                token);
+
+            /*
+            |--------------------------------------------------------------------------
+            | CLEANUP
+            |--------------------------------------------------------------------------
+            */
+
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+
+            return batchId;
+        }
+        catch(Exception e)
+        {
+            return null;
+        }
+    }
     // =====================================================
     // 🖼 UPLOAD IMMAGINE
     // =====================================================
@@ -2332,5 +2653,132 @@ public class MagentoExporter : IMagentoExporter
             return name;
 
         return name.Split('|')[0].Trim();
+    }
+
+    private static string GetExtension(string? mimeType)
+    {
+        return mimeType?.ToLower() switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/jpg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            "image/gif" => ".gif",
+            _ => ".jpg"
+        };
+    }
+
+    public async Task<string?> UploadImageNewAsync(
+        ProductImage image,
+        string sku,
+        string batchId,
+        Customer customer,
+        CancellationToken token)
+    {
+        try
+        {
+            /*
+            |--------------------------------------------------------------------------
+            | GRIDFS CHECK
+            |--------------------------------------------------------------------------
+            */
+
+            if (image.GridFsId == null)
+            {
+                return null;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | EXTENSION
+            |--------------------------------------------------------------------------
+            */
+
+            var extension =
+                GetExtension(image.MimeType);
+
+            /*
+            |--------------------------------------------------------------------------
+            | FILE NAME
+            |--------------------------------------------------------------------------
+            */
+
+            var fileName =
+                $"{sku}_{batchId}{extension}";
+
+            /*
+            |--------------------------------------------------------------------------
+            | TEMP DIRECTORY
+            |--------------------------------------------------------------------------
+            */
+
+            var tempDirectory =
+                Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    "temp-images");
+
+            if (!Directory.Exists(tempDirectory))
+            {
+                Directory.CreateDirectory(tempDirectory);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | TEMP FILE
+            |--------------------------------------------------------------------------
+            */
+
+            var tempFile =
+                Path.Combine(
+                    tempDirectory,
+                    fileName);
+
+            /*
+            |--------------------------------------------------------------------------
+            | DOWNLOAD GRIDFS -> FILE
+            |--------------------------------------------------------------------------
+            */
+
+            await _imageStorage
+                .DownloadToFileAsync(
+                    image.GridFsId.Value,
+                    tempFile,
+                    token);
+
+            /*
+            |--------------------------------------------------------------------------
+            | FTP UPLOAD
+            |--------------------------------------------------------------------------
+            */
+
+            await UploadFtpAsync(
+                tempFile,
+                customer,
+                token,
+                "/var/import/images");
+
+            /*
+            |--------------------------------------------------------------------------
+            | DELETE TEMP
+            |--------------------------------------------------------------------------
+            */
+
+            if (File.Exists(tempFile))
+            {
+                File.Delete(tempFile);
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | RETURN
+            |--------------------------------------------------------------------------
+            */
+
+            return fileName;
+        }
+        catch (Exception ex)
+        {
+            return null;
+        }
     }
 }

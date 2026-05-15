@@ -68,6 +68,8 @@ public class MagentoExportStepProcessor : IStepProcessor
             // 🔹 mapping unico
             var mapped = MapProducts(resolvedList);
 
+            var sku = mapped.Select(a => a.Aic).ToList();
+
             // 🔹 download prodotti
             var metadata = await exporter.GetMagentoMetadataAsync(batchId, token);
             var magentoSet = metadata.magentoProducts!
@@ -92,11 +94,17 @@ public class MagentoExportStepProcessor : IStepProcessor
             // 🔹 IMMAGINI
             if (type is TypeRun.ImportImmagini)
             {
-                skus = mapped.Where(a => a.Images.Count > 0).Select(x => x.Aic).ToList();
-                await exporter.UpdateImageBulkAsync(mapped, token);
+                //skus = mapped.Where(a => a.Images.Count > 0).Select(x => x.Aic).ToList();
+                //await exporter.UpdateImageBulkAsync(mapped, token);
+                var productWithImages = mapped.Where(a => a.Images.Count > 0).ToList();
+                if(productWithImages.Count > 0)
+                {
+                    await exporter.ImportImagesToFtpBulkAsync(productWithImages!, customer, token);
+                    await exporter.WaitPollingImagesAsync(batchId, token);
+                }
             }
 
-            if (skus.Count() > 0)
+            if (skus.Count() > 0 && (type is TypeRun.Completo or TypeRun.ImportProdotti))
             {
                 await exporter.ReindexAsync(skus, batchId, token);
                 await exporter.WaitReindexAsync(batchId, token);

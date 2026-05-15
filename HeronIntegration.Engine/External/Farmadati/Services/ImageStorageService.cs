@@ -42,4 +42,44 @@ public class ImageStorageService
         var bytes = await _bucket.DownloadAsBytesAsync(id);
         return Convert.ToBase64String(bytes);
     }
+
+    public async Task DownloadToFileAsync(
+    ObjectId id,
+    string path,
+    CancellationToken token = default)
+    {
+        try
+        {
+            await using var stream =
+                await _bucket.OpenDownloadStreamAsync(
+                    id,
+                    cancellationToken: token);
+
+            await using var file =
+                File.Create(path);
+
+            await stream.CopyToAsync(
+                file,
+                token);
+        }
+        catch(Exception e)
+        {
+            var j = e;
+        }
+    }
+
+    public async Task CopyToAsync(
+    ObjectId id,
+    Stream destination,
+    CancellationToken token = default)
+    {
+        await using var stream =
+            await _bucket.OpenDownloadStreamAsync(
+                id,
+                cancellationToken: token);
+
+        await stream.CopyToAsync(
+            destination,
+            token);
+    }
 }

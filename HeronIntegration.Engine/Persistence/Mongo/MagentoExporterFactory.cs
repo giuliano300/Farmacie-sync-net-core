@@ -26,7 +26,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo
             IBatchRepository batchRepo,
             ICustomerRepository customerRepo,
             IHostEnvironment env,
-            ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository    )
+            ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository)
         {
             _httpFactory = httpFactory;
             _imageStorage = imageStorage;

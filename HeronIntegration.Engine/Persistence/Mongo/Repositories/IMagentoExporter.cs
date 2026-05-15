@@ -51,4 +51,19 @@ public interface IMagentoExporter
 
     Task StopMagentoImportAsync(string batchId);
 
+
+    Task<string?> UploadImageNewAsync(
+        ProductImage image,
+        string sku,
+        string batchId,
+        Customer customer,
+        CancellationToken token);
+
+
+    Task<string?> ImportImagesToFtpBulkAsync(
+            List<ResolvedProduct> products,
+            Customer customer,
+            CancellationToken token);
+
+    Task WaitPollingImagesAsync(string batchId, CancellationToken token);
 }
