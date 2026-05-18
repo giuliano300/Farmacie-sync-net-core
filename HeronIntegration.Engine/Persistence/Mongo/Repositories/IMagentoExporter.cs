@@ -27,7 +27,7 @@ public interface IMagentoExporter
 
     Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(string batchId, CancellationToken token);
 
-    Task UpdateStockBulkAsync(List<InventoryItem> items, CancellationToken token);
+    Task UpdateStockBulkAsync(List<InventoryItem> items, string batchId, CancellationToken token);
     Task UpdateImageBulkAsync(List<ResolvedProduct> items, CancellationToken token);
 
    Task<MagentoMetadata> GetMagentoMetadataAsync(string batchId, CancellationToken token);

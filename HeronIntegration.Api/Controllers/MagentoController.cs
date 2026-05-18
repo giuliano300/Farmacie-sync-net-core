@@ -149,9 +149,14 @@ public class MagentoController : ControllerBase
 
                 await UpdateStockBulkInternal(batchId, exporter, token);
 
-                //token.ThrowIfCancellationRequested();
+                token.ThrowIfCancellationRequested();
 
-                //await exporter.UpdateImageBulkAsync(mappedList, token);
+                var productWithImages = toUpsert.Where(a => a.Images.Count > 0).ToList();
+                if (productWithImages.Count > 0)
+                {
+                    await exporter.ImportImagesToFtpBulkAsync(productWithImages!, customer, token);
+                    await exporter.WaitPollingImagesAsync(batchId, token);
+                }
 
                 token.ThrowIfCancellationRequested();
 
@@ -232,7 +237,7 @@ public class MagentoController : ControllerBase
             Qty = p.Availability
         }).ToList();
 
-        await exporter.UpdateStockBulkAsync(list, token);
+        await exporter.UpdateStockBulkAsync(list, batchId, token);
 
         token.ThrowIfCancellationRequested();
 

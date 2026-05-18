@@ -4,6 +4,7 @@ using HeronIntegration.Engine.Steps;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
+using System.Collections.Concurrent;
 
 public class MagentoExportStepProcessor : IStepProcessor
 {
@@ -82,29 +83,23 @@ public class MagentoExportStepProcessor : IStepProcessor
                 skus = await HandleProductUpsert(metadata, mapped, exporter, batchId, token, type);
 
             // 🔹 STOCK
-            if (type is TypeRun.Completo or TypeRun.UpdatePrezzi)
-            {
-                if (type is TypeRun.UpdatePrezzi)
-                {
-                    skus = mapped.Select(x => x.Aic).ToList();
-                }
-                await HandleStockUpdate(mapped, exporter, batchId, token);
-            }
+            if (type is TypeRun.UpdatePrezzi)
+                skus = (await HandleStockUpdate(metadata, mapped, exporter, batchId, token)!).Select(a => a.Sku).ToList();
 
             // 🔹 IMMAGINI
-            if (type is TypeRun.ImportImmagini)
+            if (type is TypeRun.Completo or TypeRun.ImportImmagini)
             {
-                //skus = mapped.Where(a => a.Images.Count > 0).Select(x => x.Aic).ToList();
-                //await exporter.UpdateImageBulkAsync(mapped, token);
                 var productWithImages = mapped.Where(a => a.Images.Count > 0).ToList();
                 if(productWithImages.Count > 0)
                 {
+                    if (type is TypeRun.ImportImmagini)
+                        skus = productWithImages.Select(a => a.Aic).ToList();
                     await exporter.ImportImagesToFtpBulkAsync(productWithImages!, customer, token);
                     await exporter.WaitPollingImagesAsync(batchId, token);
                 }
             }
 
-            if (skus.Count() > 0 && (type is TypeRun.Completo or TypeRun.ImportProdotti))
+            if (skus.Count > 0)
             {
                 await exporter.ReindexAsync(skus, batchId, token);
                 await exporter.WaitReindexAsync(batchId, token);
@@ -282,20 +277,143 @@ public class MagentoExportStepProcessor : IStepProcessor
                desc == (p.LongDescription ?? "").Trim();
     }
 
-    private async Task HandleStockUpdate(
+    private async Task<List<InventoryItem>>? HandleStockUpdate(
+    MagentoMetadata magentoMetadata,
     List<ResolvedProduct> mapped,
     IMagentoExporter exporter,
     string batchId,
     CancellationToken token)
     {
-        var items = mapped.Select(p => new InventoryItem
+        var magentoProducts = magentoMetadata.magentoProducts;
+        var magentoDict = magentoProducts!.ToDictionary(x => x.Sku, x => x);
+
+        var processed = 0;
+
+        var statusItems =
+            new ConcurrentBag<InventoryItem>();
+
+        var toUpdate =
+            new ConcurrentBag<ResolvedProduct>();
+
+        await Parallel.ForEachAsync(
+            mapped,
+            new ParallelOptions
+            {
+                MaxDegreeOfParallelism =
+                    Environment.ProcessorCount
+            },
+            async (i, ct) =>
+            {
+                Interlocked.Increment(
+                    ref processed
+                );
+
+                /*
+                |--------------------------------------------------------------------------
+                | PRODUCT
+                |--------------------------------------------------------------------------
+                */
+
+                if (!magentoDict.TryGetValue(
+                        i.Aic,
+                        out var product))
+                {
+                    return;
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | SAME QTY
+                |--------------------------------------------------------------------------
+                */
+
+                if (product.Qty == i.Availability)
+                {
+                    statusItems.Add(
+                        new InventoryItem()
+                        {
+                            Id = batchId,
+                            Sku = i.Aic,
+                            Qty = i.Availability
+                        });
+
+                    return;
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | TO UPDATE
+                |--------------------------------------------------------------------------
+                */
+
+                toUpdate.Add(i);
+
+                /*
+                |--------------------------------------------------------------------------
+                | BULK EVERY 200
+                |--------------------------------------------------------------------------
+                */
+
+                if (
+                    statusItems.Count >= 200
+                )
+                {
+                    /*
+                    |--------------------------------------------------------------------------
+                    | LOCK
+                    |--------------------------------------------------------------------------
+                    */
+
+                    List<InventoryItem> chunk;
+
+                    lock (statusItems)
+                    {
+                        if (
+                            statusItems.Count < 200
+                        )
+                        {
+                            return;
+                        }
+
+                        chunk =
+                            statusItems
+                                .Take(200)
+                                .ToList();
+
+                        foreach (var x in chunk)
+                        {
+                            statusItems.TryTake(
+                                out _
+                            );
+                        }
+                    }
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | BULK UPDATE
+                    |--------------------------------------------------------------------------
+                    */
+
+                    await _exportRepo
+                        .SetStatusBulkAsync(
+                            chunk,
+                            ExportStatus.UpdatePrice
+                        );
+
+                }
+            });
+
+        var items = toUpdate.Select(p => new InventoryItem
         {
             Id = batchId,
             Sku = p.Aic,
             Qty = p.Availability
         }).ToList();
 
-        await exporter.UpdateStockBulkAsync(items, token);
+
+        await exporter.UpdateStockBulkAsync(items, batchId, token);
+
+        return items;
     }
 
 }

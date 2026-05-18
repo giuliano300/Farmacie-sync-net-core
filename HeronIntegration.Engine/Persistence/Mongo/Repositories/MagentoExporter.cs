@@ -386,6 +386,7 @@ public class MagentoExporter : IMagentoExporter
             string batchId,
             CancellationToken token)
     {
+        try { 
         var mapped =
             products
                 .Select(MapMagentoProduct)
@@ -411,6 +412,71 @@ public class MagentoExporter : IMagentoExporter
         using var response =
             await _http.PostAsync(
                 $"{BaseUrl}/rest/V1/heron/import-products",
+                content,
+                token
+            );
+
+        var responseContent =
+            await response.Content
+                .ReadAsStringAsync(token);
+
+        response.EnsureSuccessStatusCode();
+
+        var jsonString =
+        System.Text.Json.JsonSerializer.Deserialize<string>(
+            responseContent
+        );
+
+        return System.Text.Json.JsonSerializer.Deserialize
+            <MagentoImportResponse>(
+                jsonString!,
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                }
+            );
+        }
+        catch 
+        {
+
+        }
+        return null;
+    }
+
+    // =====================================================
+    // 🔥 UPSERT QUANTITA' PRODOTTO API CUSTOM
+    // =====================================================
+    private async Task<MagentoImportResponse?>
+        UpdateQtyProductCustomBulkAsync(
+            List<InventoryItem> products,
+            string batchId,
+            CancellationToken token)
+    {
+        var mapped =
+            products
+                .Select(MapMagentoQtyProduct)
+                .ToList();
+
+        var request = new
+        {
+            products = System.Text.Json.JsonSerializer.Serialize(
+                mapped
+            )
+        };
+
+        var json =
+            System.Text.Json.JsonSerializer.Serialize(request);
+
+        using var content =
+            new StringContent(
+                json,
+                Encoding.UTF8,
+                "application/json"
+            );
+
+        using var response =
+            await _http.PostAsync(
+                $"{BaseUrl}/rest/V1/heron/update-qty",
                 content,
                 token
             );
@@ -614,7 +680,7 @@ public class MagentoExporter : IMagentoExporter
             supplier = x.SupplierCode!,
 
             weight = x.Weight,
-            
+
             vat = x.Vat,
 
             website_ids = new List<int>
@@ -629,6 +695,20 @@ public class MagentoExporter : IMagentoExporter
                     x.MagentoCategoryId.Value
                     }
                     : new List<int>()
+        };
+    }
+
+    // =====================================================
+    // 🔥 MAP QUANTITA' PRODOTTO MAGENTO API CUSTOM
+    // =====================================================
+    private MagentoBulkQty MapMagentoQtyProduct(
+    InventoryItem x)
+    {
+        return new MagentoBulkQty
+        {
+            sku = x.Sku,
+            qty = x.Qty,
+            //qty = 50
         };
     }
 
@@ -1364,11 +1444,13 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     // 🔥 UPDATE STOCK
     // =====================================================
-    public async Task UpdateStockBulkAsync(List<InventoryItem> items, CancellationToken token)
+    public async Task UpdateStockBulkAsync(List<InventoryItem> items, string batchId, CancellationToken token)
     {
         try
         {
-            var b = await _batchRepo.GetByIdAsync(items[0].Id);
+            var l = items.ToList();
+
+            var b = await _batchRepo.GetByIdAsync(batchId);
             if (b == null)
                 return;
 
@@ -1379,13 +1461,47 @@ public class MagentoExporter : IMagentoExporter
             //INVIO UNO PER UNO
             if (!c.Msi)
             {
-                await ProcessChannelAsync(
-                    items,
-                    async (item, ct) =>
+                var importedSkus = new ConcurrentBag<string>();
+
+                var chunks = l.Chunk(1000);
+
+                await Parallel.ForEachAsync(
+                    chunks,
+                    new ParallelOptions
                     {
-                        await UpdateQuantityAsync(item.Id, item.Sku, item.Qty, ct);
+                        MaxDegreeOfParallelism = 3,
+                        CancellationToken = token
                     },
-                    token);
+                    async (chunk, ct) =>
+                    {
+                        var result =
+                            await UpdateQtyProductCustomBulkAsync(
+                                chunk.ToList(),
+                                batchId,
+                                ct
+                            );
+
+                        if (result?.Items == null)
+                            return;
+
+                        foreach (var item in result.Items)
+                        {
+                            if (
+                                item.Success &&
+                                (
+                                    item.InsertType == 1 ||
+                                    item.InsertType == 2
+                                )
+                            )
+                            {
+                                importedSkus.Add(item.Sku);
+                                await _exportRepo.SetStatusAsync(batchId, item.Sku, ExportStatus.UpdatePrice);
+                            }
+                            if (!item.Success)
+                                await _exportRepo.SetErrorAsync(batchId, item.Sku, item.Message);
+                        }
+                    });
+
             }
             else
                 //INVIO BULK

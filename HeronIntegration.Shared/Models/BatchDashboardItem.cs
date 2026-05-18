@@ -76,14 +76,29 @@ namespace HeronIntegration.Shared.Models
         }
 
         public double ProgressInsert =>
-            Math.Round(SafeDivide(Insert + UpdatePrice + Success, Total) * 100, 2);
+            Math.Round(SafeDivide(Insert, Total) * 100, 2);
 
         public double ProgressUpdatePrice =>
-            Math.Round(SafeDivide(UpdatePrice + Success, totalMagentoProducts ?? 0) * 100, 2);
+            Math.Round(SafeDivide(UpdatePrice, Total) * 100, 2);
 
-        public double ProgressInsertImages =>
-            Math.Round(SafeDivide(InsertImages, totalMagentoProducts ?? 0) * 100, 2);
+        public double ProgressInsertImages
+        {
+            get
+            {
+                var result =
+                    Math.Round(
+                        SafeDivide(
+                            InsertImages,
+                            Total
+                        ) * 100,
+                        2
+                    );
 
+                Console.WriteLine($"RESULT: {totalMagentoProducts}");
+
+                return result;
+            }
+        }
         public double Progress =>
             Math.Round(SafeDivide(Success, totalMagentoProducts ?? 0) * 100, 2);
     }

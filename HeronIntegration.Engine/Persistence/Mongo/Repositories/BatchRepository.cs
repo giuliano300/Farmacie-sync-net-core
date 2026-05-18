@@ -344,10 +344,12 @@ public class BatchRepository : IBatchRepository
 
                 case ExportStatus.InsertImages:
                     exportInsertImage++;
+                    exportInsert++;
                     break;
 
                 case ExportStatus.Error:
                     exportError++;
+                    exportInsert++;
                     break;
             }
         }
@@ -394,6 +396,7 @@ public class BatchRepository : IBatchRepository
                 InsertImages = exportInsertImage,
                 Pending = exportPending
             }
+
         };
     }
 }
