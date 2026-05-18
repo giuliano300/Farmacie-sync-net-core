@@ -1676,8 +1676,13 @@ public class MagentoExporter : IMagentoExporter
             | TEMP ROOT
             |--------------------------------------------------------------------------
             */
+            var root = _env.ContentRootPath;
+            var parent = Directory.GetParent(root)!.FullName;
 
-            var tempRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "temp-zip");
+            var tempRoot = Path.Combine(
+                parent,
+                "temp-zip"
+            );
 
             if (!Directory.Exists(tempRoot))
             {
