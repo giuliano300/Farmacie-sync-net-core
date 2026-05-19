@@ -106,7 +106,7 @@ public class ImportToMagentoStatusRepository : IImportToMagentoStatusRepository
 
         if (reindexPercent.HasValue)
             updates.Add(
-                builder.Inc(
+                builder.Set(
                     x => x.ReindexPercent,
                     reindexPercent.Value
                 )

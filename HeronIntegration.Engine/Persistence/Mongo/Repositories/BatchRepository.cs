@@ -430,12 +430,19 @@ public class BatchRepository : IBatchRepository
                     new MagentoStep
                     {
                         Total = insertTotal,
-                        Processed = insertProcessed,
+
+                        Processed = Math.Min(
+                            insertProcessed,
+                            insertTotal
+                        ),
+
                         Pending = Math.Max(
                             0,
                             insertTotal - insertProcessed
                         ),
+
                         Errors = 0,
+
                         Status =
                             magento?.InsertProductsStatus
                             ?? OperationsStatus.None
@@ -445,12 +452,19 @@ public class BatchRepository : IBatchRepository
                     new MagentoStep
                     {
                         Total = updateTotal,
-                        Processed = updateProcessed,
+
+                        Processed = Math.Min(
+                            updateProcessed,
+                            updateTotal
+                        ),
+
                         Pending = Math.Max(
                             0,
                             updateTotal - updateProcessed
                         ),
+
                         Errors = 0,
+
                         Status =
                             magento?.UpdateProductsStatus
                             ?? OperationsStatus.None
@@ -460,17 +474,38 @@ public class BatchRepository : IBatchRepository
                     new MagentoStep
                     {
                         Total = imageTotal,
-                        Processed = imageProcessed,
+
+                        Processed = Math.Min(
+                            imageProcessed,
+                            imageTotal
+                        ),
+
                         Pending = Math.Max(
                             0,
                             imageTotal - imageProcessed
                         ),
+
                         Errors = 0,
+
                         Status =
                             magento?.InsertImagesStatus
                             ?? OperationsStatus.None
                     }
-            }        
+            },
+            ReindexValues =
+                new ReindexStatus
+                {
+                    Running =
+                        magento?.ReindexStatus
+                        == OperationsStatus.Running,
+
+                    Percent =
+                        magento?.ReindexPercent
+                        ?? 0,
+
+                    Processed = 0,
+                    Total = 0
+                }
         };
     }
 }
