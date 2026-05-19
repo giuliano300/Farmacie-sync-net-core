@@ -15,8 +15,8 @@ public class BatchRepository : IBatchRepository
     private readonly IRawProductRepository _rawRepo;
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
-    private readonly IExportRepository _exportRepo;
     private readonly BatchProcessManager _processManager;
+    private readonly IImportToMagentoStatusRepository _importToMagentoStatusRepo;
 
     public BatchRepository(
         MongoContext context,
@@ -25,8 +25,8 @@ public class BatchRepository : IBatchRepository
         IRawProductRepository rawRepo,
         IEnrichedProductRepository enrichedRepo,
         IResolvedProductRepository resolvedRepo,
-        IExportRepository exportRepo,
-        BatchProcessManager processManager
+        BatchProcessManager processManager,
+        IImportToMagentoStatusRepository importToMagentoStatusRepo
         )
     {
         _context = context;
@@ -35,8 +35,8 @@ public class BatchRepository : IBatchRepository
         _rawRepo = rawRepo;
         _enrichedRepo = enrichedRepo;
         _resolvedRepo = resolvedRepo;
-        _exportRepo = exportRepo;
         _processManager = processManager;
+        _importToMagentoStatusRepo = importToMagentoStatusRepo;
     }
 
     public async Task<List<BatchExecution>> GetLastAsync(int limit)
@@ -277,126 +277,200 @@ public class BatchRepository : IBatchRepository
         await _context.BatchExecutions.DeleteOneAsync(x => x.Id == objectId);
     }
 
-    public async Task<BatchDashboardItem> BuildBatchDashboard(BatchExecution batch)
+    public async Task<BatchDashboardItem> BuildBatchDashboard(
+        BatchExecution batch)
     {
-        var batchId = batch.Id.ToString();
+        var batchId =
+            batch.Id.ToString();
 
-        // Query parallele
-        var stepsTask = _stepRepo.GetByBatchAsync(batchId);
-        var rawTask = _rawRepo.CountByBatchAsync(batchId);
-        var enrichedTask = _enrichedRepo.CountByBatchAsync(batchId);
-        var resolvedTask = _resolvedRepo.CountByBatchAsync(batchId);
-        var exportTask = _exportRepo.GetByBatchAsync(batchId);
-        var exportErrorsTask = _exportRepo.CountErrorsAsync(batchId);
-        var customerTask = _customerRepo.GetByIdAsync(batch.CustomerId);
+        var stepsTask =
+            _stepRepo.GetByBatchAsync(batchId);
+
+        var rawTask =
+            _rawRepo.CountByBatchAsync(batchId);
+
+        var enrichedTask =
+            _enrichedRepo.CountByBatchAsync(batchId);
+
+        var resolvedTask =
+            _resolvedRepo.CountByBatchAsync(batchId);
+
+        var customerTask =
+            _customerRepo.GetByIdAsync(
+                batch.CustomerId
+            );
+
+        var magentoTask =
+            _importToMagentoStatusRepo
+                .GetByBatchAsync(batchId);
 
         await Task.WhenAll(
             stepsTask,
             rawTask,
             enrichedTask,
             resolvedTask,
-            exportTask,
-            exportErrorsTask,
-            customerTask
+            customerTask,
+            magentoTask
         );
 
-        var steps = stepsTask.Result;
-        var rawTotal = rawTask.Result;
-        var enrichedTotal = enrichedTask.Result;
-        var resolvedTotal = resolvedTask.Result;
-        var export = exportTask.Result;
-        var exportErrors = exportErrorsTask.Result;
-        var customer = customerTask.Result;
+        var steps =
+            stepsTask.Result;
 
-        var currentStep = steps
-            .OrderByDescending(x => x.StartedAt)
-            .FirstOrDefault();
+        var rawTotal =
+            rawTask.Result;
 
-        var exportTotal = export.Count();
+        var enrichedTotal =
+            enrichedTask.Result;
 
-        // calcolo metriche export in un solo passaggio
-        int exportPending = 0;
-        int exportSuccess = 0;
-        int exportInsert = 0;
-        int exportUpdatePrice = 0;
-        int exportError = 0;
-        int exportInsertImage = 0;
+        var resolvedTotal =
+            resolvedTask.Result;
 
-        foreach (var e in export)
-        {
-            switch (e.Status)
-            {
-                case ExportStatus.Pending:
-                    exportPending++;
-                    break;
+        var customer =
+            customerTask.Result;
 
-                case ExportStatus.Success:
-                    exportSuccess++;
-                    break;
+        var magento =
+            magentoTask.Result;
 
-                case ExportStatus.Insert:
-                    exportInsert++;
-                    break;
+        var currentStep =
+            steps
+                .OrderByDescending(
+                    x => x.StartedAt
+                )
+                .FirstOrDefault();
 
-                case ExportStatus.UpdatePrice:
-                    exportUpdatePrice++;
-                    break;
+        var insertTotal =
+            magento?.TotalProductsToInsert
+            ?? 0;
 
-                case ExportStatus.InsertImages:
-                    exportInsertImage++;
-                    exportInsert++;
-                    break;
+        var insertProcessed =
+            magento?.TotalProductsInserted
+            ?? 0;
 
-                case ExportStatus.Error:
-                    exportError++;
-                    exportInsert++;
-                    break;
-            }
-        }
+        var updateTotal =
+            magento?.TotalProductsToUpdate
+            ?? 0;
+
+        var updateProcessed =
+            magento?.TotalProductsUpdated
+            ?? 0;
+
+        var imageTotal =
+            magento?.TotalImagesToInsert
+            ?? 0;
+
+        var imageProcessed =
+            magento?.TotalImagesInserted
+            ?? 0;
 
         return new BatchDashboardItem
         {
             BatchId = batchId,
-            SequenceNumber = batch.SequenceNumber,
+
+            SequenceNumber =
+                batch.SequenceNumber,
+
             Customer = customer!,
-            StartedAt = batch.StartedAt,
-            Status = batch.Status,
 
-            CurrentStep = currentStep?.Step ?? "",
-            StepStatus = currentStep?.Status ?? StepStatus.Pending,
-            type = (TypeRun)batch.type!,
+            StartedAt =
+                batch.StartedAt,
 
-            HeronImport = new StepMetrics
-            {
-                Total = rawTotal,
-                Success = rawTotal
-            },
+            Status =
+                batch.Status,
 
-            Farmadati = new StepMetrics
-            {
-                Total = rawTotal,
-                Success = enrichedTotal
-            },
+            CurrentStep =
+                currentStep?.Step
+                ?? "",
 
-            Suppliers = new StepMetrics
-            {
-                Total = rawTotal,
-                Success = resolvedTotal
-            },
+            StepStatus =
+                currentStep?.Status
+                ?? StepStatus.Pending,
+
+            type =
+                (TypeRun)batch.type!,
+
+            HeronImport =
+                new StepMetrics
+                {
+                    Total = rawTotal,
+                    Success = rawTotal
+                },
+
+            Farmadati =
+                new StepMetrics
+                {
+                    Total = rawTotal,
+                    Success = enrichedTotal
+                },
+
+            Suppliers =
+                new StepMetrics
+                {
+                    Total = rawTotal,
+                    Success = resolvedTotal
+                },
 
             Magento = new StepMetricsMagento
             {
-                totalDownloadMagentoProducts = batch.totalDownloadMagentoProducts,
-                totalMagentoProducts = batch.totalMagentoProducts,
-                Total = exportTotal,
-                Success = exportSuccess,
-                Errors = exportErrors,
-                Insert = exportInsert,
-                UpdatePrice = exportUpdatePrice,
-                InsertImages = exportInsertImage,
-                Pending = exportPending
-            }
+                TotalMagentoProducts =
+                    batch.totalMagentoProducts,
 
+                DownloadedMagentoProducts =
+                    batch.totalDownloadMagentoProducts,
+
+                HasInsertProducts =
+                    magento?.InsertProducts ?? false,
+
+                HasInsertImages =
+                    magento?.InsertImages ?? false,
+
+                HasUpdateQty =
+                    magento?.UpdateQty ?? false,
+
+                InsertProducts =
+                    new MagentoStep
+                    {
+                        Total = insertTotal,
+                        Processed = insertProcessed,
+                        Pending = Math.Max(
+                            0,
+                            insertTotal - insertProcessed
+                        ),
+                        Errors = 0,
+                        Status =
+                            magento?.InsertProductsStatus
+                            ?? OperationsStatus.None
+                    },
+
+                UpdateProducts =
+                    new MagentoStep
+                    {
+                        Total = updateTotal,
+                        Processed = updateProcessed,
+                        Pending = Math.Max(
+                            0,
+                            updateTotal - updateProcessed
+                        ),
+                        Errors = 0,
+                        Status =
+                            magento?.UpdateProductsStatus
+                            ?? OperationsStatus.None
+                    },
+
+                InsertImages =
+                    new MagentoStep
+                    {
+                        Total = imageTotal,
+                        Processed = imageProcessed,
+                        Pending = Math.Max(
+                            0,
+                            imageTotal - imageProcessed
+                        ),
+                        Errors = 0,
+                        Status =
+                            magento?.InsertImagesStatus
+                            ?? OperationsStatus.None
+                    }
+            }        
         };
     }
 }

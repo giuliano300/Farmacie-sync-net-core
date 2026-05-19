@@ -76,4 +76,7 @@ public class MongoContext
     public IMongoCollection<ProductToExclude> ProductToExclude =>
     _database.GetCollection<ProductToExclude>("product_to_exclude");
 
+    public IMongoCollection<ImportToMagentoStatus> ImportToMagentoStatus =>
+    _database.GetCollection<ImportToMagentoStatus>("import_to_magento_status");
+
 }

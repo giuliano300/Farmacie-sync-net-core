@@ -18,6 +18,7 @@ public class MagentoExportStepProcessor : IStepProcessor
     private readonly IMagentoExporterFactory _magentoExporterFactory;
     private readonly IStepRepository _stepRepo;
     private readonly ICleanupService _cleanupService;
+    private readonly IImportToMagentoStatusRepository _importToMagento;
 
     public MagentoExportStepProcessor(
         IResolvedProductRepository resolvedRepo,
@@ -27,7 +28,8 @@ public class MagentoExportStepProcessor : IStepProcessor
         ICustomerRepository customerRepo,
         IMagentoExporterFactory magentoExporterFactory,
         IStepRepository stepRepo,
-        ICleanupService cleanupService
+        ICleanupService cleanupService,
+        IImportToMagentoStatusRepository importToMagento
         )
     {
         _resolvedRepo = resolvedRepo;
@@ -38,6 +40,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         _magentoExporterFactory = magentoExporterFactory;
         _stepRepo = stepRepo;
         _cleanupService = cleanupService;
+        _importToMagento = importToMagento;
     }
 
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = 0)
@@ -48,6 +51,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         {
             if (type == null)
                 type = TypeRun.Completo;
+
 
             await _cleanupService.updateExportExecution(batchId);
 
@@ -77,6 +81,9 @@ public class MagentoExportStepProcessor : IStepProcessor
                 .Select(x => x.Sku)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+            // 🔹 CREA IMPORT STAUTS
+               await _importToMagento.Start(batchId, mapped.Count, type!);
+
             var skus = new List<string>();
             // 🔹 UPSERT
             if (type is TypeRun.Completo or TypeRun.ImportProdotti)
@@ -101,6 +108,13 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             if (skus.Count > 0)
             {
+                //AGGIORNA IL REINDEX A RUNNING
+                await _importToMagento.UpdateImportStatusAsync(batchId, 
+                    insertProductsStatus: OperationsStatus.Ended,
+                    updateProductsStatus: OperationsStatus.Ended,
+                    insertImagesStatus: OperationsStatus.Ended,
+                    reindexStatus: OperationsStatus.Running);
+
                 await exporter.ReindexAsync(skus, batchId, token);
                 await exporter.WaitReindexAsync(batchId, token);
                 await exporter.CleanIndex(token);
@@ -110,6 +124,15 @@ public class MagentoExportStepProcessor : IStepProcessor
             // FINALIZE
             await _batchFinalizer.FinalizeBatchAsync(batchId);
             //await exporter.StopMagentoImportAsync(batchId);
+
+            //TERMINA TUTTO
+            await _importToMagento.UpdateImportStatusAsync(batchId,
+                    insertProductsStatus: OperationsStatus.Ended,
+                    updateProductsStatus: OperationsStatus.Ended,
+                    insertImagesStatus: OperationsStatus.Ended,
+                    reindexStatus: OperationsStatus.Ended,
+                    importStatus: OperationsStatus.Ended,
+                    reindexPercent: 100);
 
             result.Success = true;
         }
@@ -295,6 +318,14 @@ public class MagentoExportStepProcessor : IStepProcessor
         var toUpdate =
             new ConcurrentBag<ResolvedProduct>();
 
+
+        //AGGIORNAMENTO IMPORT STATUS
+        //AGGIORNA QUANTITA' DA IMPORTARE E SETTA A RUNNING LO STATO DELL' OPERAZIONE
+        await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsToUpdate: mapped.Count, updateProductsStatus: OperationsStatus.Running);
+
+
+        //AGGIORNA 
+
         await Parallel.ForEachAsync(
             mapped,
             new ParallelOptions
@@ -399,6 +430,9 @@ public class MagentoExportStepProcessor : IStepProcessor
                             chunk,
                             ExportStatus.UpdatePrice
                         );
+
+                    //AGGIORNA LE GIACENZE AGGIORNATE
+                    await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsUpdated: chunk.Count);
 
                 }
             });

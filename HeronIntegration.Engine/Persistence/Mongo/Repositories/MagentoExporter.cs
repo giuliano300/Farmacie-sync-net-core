@@ -31,7 +31,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly ICustomerMagentoCategoriesRepository _customerMagentoCategoriesRepository;
     private readonly GridFSBucket _gridFsBucket;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
-
+    private readonly IImportToMagentoStatusRepository _importToMagento;
     private const int MaxParallel = 20;
 
     public MagentoExporter(
@@ -42,7 +42,8 @@ public class MagentoExporter : IMagentoExporter
         IBatchRepository batchRepo,
         ICustomerRepository customerRepo,
         IHostEnvironment env,
-        ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository)
+        ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository,
+        IImportToMagentoStatusRepository importToMagento)
     {
         _http = http;
         _imageStorage = imageStorage;
@@ -60,6 +61,7 @@ public class MagentoExporter : IMagentoExporter
         _http.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
         _env = env;
         _customerMagentoCategoriesRepository = customerMagentoCategoriesRepository;
+        _importToMagento = importToMagento;
     }
 
     // =====================================================
@@ -101,12 +103,17 @@ public class MagentoExporter : IMagentoExporter
             if (c == null)
                 return;
 
+            //AGGIORNAMENTO IMPORT STATUS
+            //AGGIORNA QUANTITA' DA IMPORTARE E SETTA A RUNNING LO STATO DELL' OPERAZIONE
+            await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsToInsert: l.Count, insertProductsStatus: OperationsStatus.Running);
+
             //INVIO UNO PER UNO
             if (!c.Msi)
             {
+                int elem = 1000;
                 var importedSkus = new ConcurrentBag<string>();
 
-                var chunks = l.Chunk(1000);
+                var chunks = l.Chunk(elem);
 
                 await Parallel.ForEachAsync(
                     chunks,
@@ -143,7 +150,12 @@ public class MagentoExporter : IMagentoExporter
                             if(!item.Success)
                                 await _exportRepo.SetErrorAsync(batchId, item.Sku, item.Message);
                         }
+                        //AGGIORNA LO STATUS DELL'OPERAZIONE
+                        await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsInserted: elem);
                     });
+
+                //AGGIORNA LO STATUS DELL'OPERAZIONE TERMINANDOLA
+                await _importToMagento.UpdateImportStatusAsync(batchId, insertProductsStatus: OperationsStatus.Ended);
             }
 
             else
@@ -247,6 +259,9 @@ public class MagentoExporter : IMagentoExporter
                     $"{result.Percent}%"
                 );
 
+                // AGGIORNO IL REINDEX
+                await _importToMagento.UpdateImportStatusAsync(batchId, reindexPercent: result.Percent);
+
                 if (!result.Running)
                 {
                     break;
@@ -311,6 +326,10 @@ public class MagentoExporter : IMagentoExporter
                     l,
                     ExportStatus.InsertImages
                 );
+
+                //AGGIORNAMENTO IMPORT STATUS
+                //AGGIORNA QUANTITA' IMPORTATA
+                await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesInserted: l.Count);
             }
 
 
@@ -322,6 +341,8 @@ public class MagentoExporter : IMagentoExporter
 
                 if (!result.Running && result.Percent == 100)
                 {
+                    //AGGIORNAMENTO IMPORT STATUS TERMINATO
+                    await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
                     break;
                 }
             }
@@ -1461,9 +1482,10 @@ public class MagentoExporter : IMagentoExporter
             //INVIO UNO PER UNO
             if (!c.Msi)
             {
+                int elem = 1000;
                 var importedSkus = new ConcurrentBag<string>();
 
-                var chunks = l.Chunk(1000);
+                var chunks = l.Chunk(elem);
 
                 await Parallel.ForEachAsync(
                     chunks,
@@ -1500,7 +1522,14 @@ public class MagentoExporter : IMagentoExporter
                             if (!item.Success)
                                 await _exportRepo.SetErrorAsync(batchId, item.Sku, item.Message);
                         }
+
+                        await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsUpdated: elem);
+
                     });
+
+
+                //AGGIORNA LO STATUS DELL'OPERAZIONE TERMINANDOLA
+                await _importToMagento.UpdateImportStatusAsync(batchId, updateProductsStatus: OperationsStatus.Ended);
 
             }
             else
@@ -1649,6 +1678,7 @@ public class MagentoExporter : IMagentoExporter
     {
         try
         {
+
             /*
             |--------------------------------------------------------------------------
             | VALIDATION
@@ -1670,6 +1700,15 @@ public class MagentoExporter : IMagentoExporter
 
             var batchId =
                 products.First().BatchId.ToString();
+
+            /*
+            |--------------------------------------------------------------------------
+            |  AGGIORNAMENTO IMPORT STATUS
+               AGGIORNA QUANTITA' DA IMPORTARE E SETTA A RUNNING LO STATO DELL' OPERAZIONE
+            |--------------------------------------------------------------------------
+            */
+
+            await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesToInsert: products.Count, insertImagesStatus: OperationsStatus.Running);
 
             /*
             |--------------------------------------------------------------------------

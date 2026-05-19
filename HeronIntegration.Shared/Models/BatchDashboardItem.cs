@@ -38,68 +38,33 @@ namespace HeronIntegration.Shared.Models
 
     public class StepMetricsMagento
     {
+        public int? TotalMagentoProducts { get; set; }
+        public int? DownloadedMagentoProducts { get; set; }
+
+        // FLAG CONFIGURAZIONE BATCH
+        public bool HasInsertProducts { get; set; }
+        public bool HasInsertImages { get; set; }
+        public bool HasUpdateQty { get; set; }
+
+        public MagentoStep InsertProducts { get; set; } = new();
+        public MagentoStep UpdateProducts { get; set; } = new();
+        public MagentoStep InsertImages { get; set; } = new();
+
+        public double ProgressDownload { get; set; }
+        public double ProgressTotal { get; set; }
+    }
+
+    public class MagentoStep
+    {
         public int Total { get; set; }
+        public int Processed { get; set; }
         public int Pending { get; set; }
-        public int Insert { get; set; }
-        public int InsertImages { get; set; }
-        public int UpdatePrice { get; set; }
-        public int Success { get; set; }
         public int Errors { get; set; }
-        public int? totalMagentoProducts { get; set; }
-        public int? totalDownloadMagentoProducts { get; set; }
+        public OperationsStatus Status { get; set; }
 
-        private double SafeDivide(double a, double b)
-        {
-            if (b == 0) return 0;
-            var result = a / b;
-            return double.IsFinite(result) ? result : 0;
-        }
-
-        public double ProgressDownload
-        {
-            get
-            {
-                if (!totalMagentoProducts.HasValue || !totalDownloadMagentoProducts.HasValue)
-                    return 0;
-
-                var total = totalMagentoProducts.Value;
-                var downloaded = totalDownloadMagentoProducts.Value;
-
-                if (total == 0 && downloaded == 0)
-                    return 100;
-
-                if (total == 0)
-                    return 0;
-
-                return Math.Round(SafeDivide(downloaded, total) * 100, 2);
-            }
-        }
-
-        public double ProgressInsert =>
-            Math.Round(SafeDivide(Insert, Total) * 100, 2);
-
-        public double ProgressUpdatePrice =>
-            Math.Round(SafeDivide(UpdatePrice, Total) * 100, 2);
-
-        public double ProgressInsertImages
-        {
-            get
-            {
-                var result =
-                    Math.Round(
-                        SafeDivide(
-                            InsertImages,
-                            Total
-                        ) * 100,
-                        2
-                    );
-
-                Console.WriteLine($"RESULT: {totalMagentoProducts}");
-
-                return result;
-            }
-        }
         public double Progress =>
-            Math.Round(SafeDivide(Success, totalMagentoProducts ?? 0) * 100, 2);
+            Total == 0
+                ? 0
+                : Math.Round((double)Processed / Total * 100, 2);
     }
 }

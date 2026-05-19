@@ -185,6 +185,7 @@ builder.Services.AddScoped<IFarmadatiUpdatesRepository, FarmadatiUpdatesReposito
 builder.Services.AddHttpClient<IMagentoExporter, MagentoExporter>();
 builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
 
+builder.Services.AddScoped<IImportToMagentoStatusRepository, ImportToMagentoStatusRepository>();
 
 builder.Services.AddCors(options =>
 {
