@@ -18,6 +18,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using MongoDB.Driver.GridFS;
+using System.Diagnostics;
 
 public class MagentoExporter : IMagentoExporter
 {
@@ -1752,145 +1753,11 @@ public class MagentoExporter : IMagentoExporter
 
             /*
             |--------------------------------------------------------------------------
-            | PAYLOAD
-            |--------------------------------------------------------------------------
-            */
-
-            var payload =
-                new List<object>();
-
-            /*
-            |--------------------------------------------------------------------------
             | CREATE ZIP
             |--------------------------------------------------------------------------
             */
 
-            await using (
-                var zipFileStream =
-                    new FileStream(
-                        zipPath,
-                        FileMode.CreateNew,
-                        FileAccess.Write,
-                        FileShare.None,
-                        1024 * 1024,
-                        FileOptions.Asynchronous |
-                        FileOptions.SequentialScan))
-            {
-                using (
-                    var archive =
-                        new ZipArchive(
-                            zipFileStream,
-                            ZipArchiveMode.Create,
-                            true))
-                {
-                    /*
-                    |--------------------------------------------------------------------------
-                    | PRODUCTS
-                    |--------------------------------------------------------------------------
-                    */
-
-                    foreach (var product in products)
-                    {
-                        try
-                        {
-                            if (
-                                product.Images == null ||
-                                !product.Images.Any())
-                            {
-                                continue;
-                            }
-
-                            var imageNames =
-                                new List<string>();
-
-                            int index = 1;
-
-                            /*
-                            |--------------------------------------------------------------------------
-                            | IMAGES
-                            |--------------------------------------------------------------------------
-                            */
-
-                            foreach (var image in product.Images)
-                            {
-                                try
-                                {
-                                    if (image.GridFsId == null)
-                                    {
-                                        continue;
-                                    }
-
-                                    /*
-                                    |--------------------------------------------------------------------------
-                                    | FILE NAME
-                                    |--------------------------------------------------------------------------
-                                    */
-
-                                    var extension =
-                                        GetExtension(
-                                            image.MimeType);
-
-                                    var fileName =
-                                        $"{product.Aic}_{index}{extension}";
-
-                                    /*
-                                    |--------------------------------------------------------------------------
-                                    | ZIP ENTRY
-                                    |--------------------------------------------------------------------------
-                                    */
-
-                                    var entry =
-                                        archive.CreateEntry(
-                                            fileName,
-                                            CompressionLevel.NoCompression);
-
-                                    /*
-                                    |--------------------------------------------------------------------------
-                                    | GRIDFS -> ZIP STREAM
-                                    |--------------------------------------------------------------------------
-                                    */
-
-                                    await using var entryStream =
-                                        entry.Open();
-
-                                    await _imageStorage.CopyToAsync(
-                                        image.GridFsId.Value,
-                                        entryStream,
-                                        token);
-
-                                    imageNames.Add(fileName);
-
-                                    index++;
-                                }
-                                catch
-                                {
-                                }
-                            }
-
-                            /*
-                            |--------------------------------------------------------------------------
-                            | PRODUCT PAYLOAD
-                            |--------------------------------------------------------------------------
-                            */
-
-                            if (imageNames.Any())
-                            {
-                                payload.Add(
-                                    new
-                                    {
-                                        sku = product.Aic,
-                                        images = imageNames
-                                    });
-                            }
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
-
-                await zipFileStream.FlushAsync(token);
-            }
+            await CreateImagesZipAsync(products, zipPath, token);
 
             /*
             |--------------------------------------------------------------------------
@@ -1933,9 +1800,211 @@ public class MagentoExporter : IMagentoExporter
             return null;
         }
     }
+
     // =====================================================
-    // 🖼 UPLOAD IMMAGINE
+    // 🔥 CREA FILE ZIP
     // =====================================================
+
+    public async Task<List<object>> CreateImagesZipAsync(
+        IEnumerable<ResolvedProduct> products,
+        string zipPath,
+        CancellationToken token = default)
+    {
+        var payload =
+            new ConcurrentDictionary<string, List<string>>();
+
+        /*
+        |--------------------------------------------------------------------------
+        | TEMP ROOT
+        |--------------------------------------------------------------------------
+        */
+        var rootTemp = @"C:\TempZip";
+
+        if (!Directory.Exists(rootTemp))
+            Directory.CreateDirectory(rootTemp);
+
+        /*
+        |--------------------------------------------------------------------------
+        | UNIQUE TEMP FOLDER
+        |--------------------------------------------------------------------------
+        */
+        var tempFolder =
+            Path.Combine(
+                rootTemp,
+                $"zip_{Guid.NewGuid():N}");
+
+        Directory.CreateDirectory(tempFolder);
+
+        try
+        {
+            /*
+            |--------------------------------------------------------------------------
+            | FLATTEN
+            |--------------------------------------------------------------------------
+            */
+            var allImages = products
+                .Where(p => p.Images != null)
+                .SelectMany(p =>
+                    p.Images
+                     .Where(i => i.GridFsId != null)
+                     .Select((img, index) => new
+                     {
+                         Product = p,
+                         Image = img,
+                         Index = index + 1
+                     }))
+                .ToList();
+
+            int processed = 0;
+
+            DebugZip(
+                $"START GRIDFS -> TOTAL:{allImages.Count}");
+
+            /*
+            |--------------------------------------------------------------------------
+            | GRIDFS DOWNLOAD PARALLEL
+            |--------------------------------------------------------------------------
+            */
+            await Parallel.ForEachAsync(
+                allImages,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = 8,
+                    CancellationToken = token
+                },
+                async (x, ct) =>
+                {
+                    try
+                    {
+                        var extension = GetExtension(x.Image.MimeType);
+                        var fileName = $"{x.Product.Aic}_{x.Index}{extension}";
+                        var filePath = Path.Combine(tempFolder, fileName);
+
+                        await using var fs = new FileStream(
+                            filePath,
+                            FileMode.Create,
+                            FileAccess.Write,
+                            FileShare.None,
+                            1024 * 1024,
+                            FileOptions.SequentialScan);
+
+                        await _imageStorage.CopyToAsync(
+                            x.Image.GridFsId!.Value,
+                            fs,
+                            ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugZip($"GRIDFS ERROR -> {ex.Message}");
+                    }
+                });
+
+            DebugZip("GRIDFS DOWNLOAD COMPLETED");
+
+            /*
+            |--------------------------------------------------------------------------
+            | DELETE OLD ZIP
+            |--------------------------------------------------------------------------
+            */
+            if (File.Exists(zipPath))
+                File.Delete(zipPath);
+
+            /*
+            |--------------------------------------------------------------------------
+            | 7-ZIP
+            |--------------------------------------------------------------------------
+            */
+            var sevenZipPath =
+                @"C:\Program Files\7-Zip\7z.exe";
+
+            if (!File.Exists(sevenZipPath))
+                throw new Exception("7-Zip non trovato");
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = sevenZipPath,
+                WorkingDirectory = tempFolder,
+                Arguments =
+                    $"a -tzip \"{zipPath}\" * -mx=0 -y",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            DebugZip("START 7ZIP");
+
+            using var process =
+                new Process
+                {
+                    StartInfo = psi
+                };
+
+            process.Start();
+
+            var stdOut =
+                await process.StandardOutput
+                    .ReadToEndAsync();
+
+            var stdErr =
+                await process.StandardError
+                    .ReadToEndAsync();
+
+            await process.WaitForExitAsync(token);
+
+            DebugZip(
+                $"7ZIP EXIT -> {process.ExitCode}");
+
+            if (process.ExitCode != 0)
+                throw new Exception(
+                    $"7ZIP ERROR -> {stdErr}");
+
+            var finalSize =
+                new FileInfo(zipPath)
+                    .Length;
+
+            DebugZip(
+                $"ZIP DONE -> MB:{Math.Round(finalSize / 1024d / 1024d, 2)}");
+
+            /*
+            |--------------------------------------------------------------------------
+            | PAYLOAD
+            |--------------------------------------------------------------------------
+            */
+            return payload
+                .Select(x => new
+                {
+                    sku = x.Key,
+                    images = x.Value
+                })
+                .Cast<object>()
+                .ToList();
+        }
+        finally
+        {
+            /*
+            |--------------------------------------------------------------------------
+            | CLEANUP
+            |--------------------------------------------------------------------------
+            */
+            try
+            {
+                if (Directory.Exists(tempFolder))
+                    Directory.Delete(
+                        tempFolder,
+                        true);
+
+                DebugZip(
+                    "TEMP CLEANUP COMPLETED");
+            }
+            catch
+            {
+            }
+        }
+    }
+       // =====================================================
+      // 🖼 UPLOAD IMMAGINE
+      // =====================================================
     public async Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct p, CancellationToken token)
     {
         var result = new MagentoInsertResult();
@@ -2940,5 +3009,12 @@ public class MagentoExporter : IMagentoExporter
         {
             return null;
         }
+    }
+
+    private void DebugZip(string message)
+    {
+        File.AppendAllText(
+            @"C:\temp\zip-debug.log",
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}{Environment.NewLine}");
     }
 }
