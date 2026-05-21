@@ -340,7 +340,7 @@ public class MagentoExporter : IMagentoExporter
                     $"{result.Percent}%"
                 );
 
-                if (!result.Running || result.Percent >= 95)
+                if (!result.Running)
                 {
                     //AGGIORNAMENTO IMPORT STATUS TERMINATO
                     await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
