@@ -263,7 +263,7 @@ public class MagentoExporter : IMagentoExporter
                 // AGGIORNO IL REINDEX
                 await _importToMagento.UpdateImportStatusAsync(batchId, reindexPercent: result.Percent);
 
-                if (!result.Running)
+                if (!result.Running || result.Percent >= 95)
                 {
                     break;
                 }
@@ -340,7 +340,7 @@ public class MagentoExporter : IMagentoExporter
                     $"{result.Percent}%"
                 );
 
-                if (!result.Running && result.Percent == 100)
+                if (!result.Running || result.Percent >= 95)
                 {
                     //AGGIORNAMENTO IMPORT STATUS TERMINATO
                     await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
