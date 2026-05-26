@@ -20,6 +20,7 @@ public class Customer
     public string HeronFtp { get; set; } = default!;
     public string HeronUsername { get; set; } = default!;
     public string HeronPassword { get; set; } = default!;
+    public string Cron { get; set; } = default!;
 
     public bool Active { get; set; } = true;
     public bool Msi { get; set; } = true;

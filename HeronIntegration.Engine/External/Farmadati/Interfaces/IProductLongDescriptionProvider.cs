@@ -6,4 +6,5 @@ public interface IProductLongDescriptionProvider
     /// Recupera la descrizione estesa del prodotto (può essere null).
     /// </summary>
     Task<string?> GetLongDescriptionAsync(string productCode);
+
 }

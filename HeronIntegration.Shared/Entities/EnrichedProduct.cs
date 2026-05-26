@@ -34,7 +34,6 @@ public class EnrichedProduct
     public decimal Weight { get; set; }
     public int HeronStock { get; set; }
     public int Vat { get; set; }
-
     public string? MacroGroup { get; set; }
 
     public List<ProductImage> Images { get; set; } = new();
@@ -69,6 +68,7 @@ public class EnrichedProduct
             OriginalPrice = raw.OriginalPrice,
 
             Vat = raw.Vat,
+            MacroGroup = null,
 
             CachedAt = DateTime.UtcNow,
 
@@ -98,6 +98,7 @@ public class EnrichedProduct
                 Producer = raw.Producer,
 
                 Vat = raw.Vat,
+                MacroGroup = cache.MacroGroup,
 
                 Images = cache.Images ?? new List<ProductImage>(),
                 HeronPrice = raw.Price,

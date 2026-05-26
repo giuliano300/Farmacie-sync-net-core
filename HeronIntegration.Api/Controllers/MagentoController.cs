@@ -101,7 +101,8 @@ public class MagentoController : ControllerBase
                     SupplierCode = p.SupplierCode,
                     Producer = p.Producer,
                     SubCategory = p.SubCategory,
-                    Images = p.Images
+                    Images = p.Images,
+                    MacroGroup = p.MacroGroup
                 }).ToList();
 
                 var mongoDict = mappedList.ToDictionary(x => x.Aic);

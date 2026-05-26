@@ -164,7 +164,8 @@ public class MagentoExportStepProcessor : IStepProcessor
             SubCategory = p.SubCategory,
             Weight = p.Weight,
             Images = p.Images,
-            Vat = p.Vat
+            Vat = p.Vat,
+            MacroGroup = p.MacroGroup
         }).ToList();
     }
 

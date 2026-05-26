@@ -1,6 +1,10 @@
 ﻿using HeronIntegration.Engine.External.Farmadati.Interfaces;
+using HeronIntegration.Engine.Persistence.Mongo;
+using HeronIntegration.Shared.Entities;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson.IO;
+using MongoDB.Driver;
+using System.ServiceModel.Channels;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -8,12 +12,14 @@ using System.Text.Json.Serialization;
 [Route("api/test/farmadati")]
 public class FarmadatiTestController : ControllerBase
 {
+    private readonly MongoContext _context;
     private readonly IProductBaseInfoProvider _provider;
     private readonly IProductLongDescriptionProvider _longProvider;
     private readonly IProductImageProvider _imgProvider;
 
-    public FarmadatiTestController(IProductBaseInfoProvider provider, IProductLongDescriptionProvider longProvider, IProductImageProvider imgProvider)
+    public FarmadatiTestController(MongoContext context, IProductBaseInfoProvider provider, IProductLongDescriptionProvider longProvider, IProductImageProvider imgProvider)
     {
+        _context = context;
         _provider = provider;
         _longProvider = longProvider;
         _imgProvider = imgProvider;
@@ -32,6 +38,57 @@ public class FarmadatiTestController : ControllerBase
 
         return Ok(img);
     }
+
+    [HttpGet("UpdateSpecificFields")]
+    public async Task UpdateSpecificFields()
+    {
+        var items = await _context.FarmadatiCaches
+          .Find(x => string.IsNullOrEmpty(x.MacroGroup))
+         .ToListAsync();
+
+        var semaphore = new SemaphoreSlim(5); // max 5 parallele
+        var tasks = new List<Task>();
+        int i = 0;
+        foreach (var item in items)
+        {
+            tasks.Add(Task.Run(async () =>
+            {
+                await semaphore.WaitAsync();
+
+                try
+                {
+                    var code = item.Aic;
+                    var result = await _provider.GetBaseInfoAsync(code);
+
+                    if (result == null)
+                        return;
+
+                    var macroGroup = result.ProductTypeCode;
+
+                    if (!string.IsNullOrEmpty(macroGroup))
+                    {
+                        var update = Builders<FarmadatiCache>.Update
+                            .Set(x => x.MacroGroup, macroGroup);
+
+                        await _context.FarmadatiCaches.UpdateOneAsync(
+                            x => x.Id == item.Id,
+                            update
+                        );
+                    }
+
+                    i++;
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+    }
+
+
 
     public class ProductMongo
     {

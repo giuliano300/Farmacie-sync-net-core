@@ -34,6 +34,7 @@ public class ResolvedProduct
     public decimal Weight { get; set; }
     public int Availability { get; set; }
     public int Vat { get; set; }
+    public string? MacroGroup { get; set; }
 
     public string? SupplierCode { get; set; }
 
@@ -69,6 +70,7 @@ public class ResolvedProduct
             Images = raw.Images,
             Weight = raw.Weight,
             Vat = raw.Vat,
+            MacroGroup = raw.MacroGroup,
             ResolvedAt = DateTime.UtcNow
         };
     }
