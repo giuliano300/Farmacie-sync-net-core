@@ -21,6 +21,8 @@ public class Customer
     public string HeronUsername { get; set; } = default!;
     public string HeronPassword { get; set; } = default!;
     public string Cron { get; set; } = default!;
+    public string Email { get; set; } = default!;
+    public string Password { get; set; } = default!;
 
     public bool Active { get; set; } = true;
     public bool Msi { get; set; } = true;

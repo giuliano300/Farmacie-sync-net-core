@@ -391,7 +391,7 @@ public class MagentoController : ControllerBase
         var exporter = _magentoExporterFactory.Create(customer.Magento);
         await exporter.DeleteProducts();
 
-        return Ok("Prodotti Eliminati");
+        return Ok(true);
     }
 
     [HttpGet("TestUploadImage")]

@@ -1,4 +1,5 @@
 ﻿using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -16,5 +17,6 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
         Task<List<Customer>> GetByIdsAsync(IEnumerable<string> ids);
         Task UpdateAsync(Customer customer);
         Task DeleteAsync(string id);
+        Task<Customer?> Login(Login l);
     }
 }

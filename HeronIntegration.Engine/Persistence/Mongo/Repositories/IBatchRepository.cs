@@ -29,7 +29,7 @@ public interface IBatchRepository
 
     Task<StepExecution?> GetCurrentStepAsync(string batchId);
 
-    Task<List<BatchExecution>> GetTodayAsync();
+    Task<List<BatchExecution>> GetTodayAsync(string? customerId);
     Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId);
     Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId);
 

@@ -705,6 +705,8 @@ public class MagentoExporter : IMagentoExporter
 
             vat = x.Vat,
 
+            macroGroup = x.MacroGroup,
+
             website_ids = new List<int>
             {
                 1

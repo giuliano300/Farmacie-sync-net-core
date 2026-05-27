@@ -216,13 +216,37 @@ public class BatchRepository : IBatchRepository
     }
 
 
-    public async Task<List<BatchExecution>> GetTodayAsync()
+    public async Task<List<BatchExecution>> GetTodayAsync(string? customerId)
     {
         var todayStart = DateTime.UtcNow.Date;
         var tomorrow = todayStart.AddDays(1);
 
+        var filter =
+            Builders<BatchExecution>.Filter.Gte(
+                x => x.StartedAt,
+                todayStart
+            ) &
+
+            Builders<BatchExecution>.Filter.Lt(
+                x => x.StartedAt,
+                tomorrow
+            ) &
+
+            Builders<BatchExecution>.Filter.Eq(
+                x => x.Status,
+                BatchStatus.Running
+            );
+
+        if (!string.IsNullOrEmpty(customerId))
+        {
+            filter &= Builders<BatchExecution>.Filter.Eq(
+                x => x.CustomerId,
+                customerId
+            );
+        }
+
         return await _context.BatchExecutions
-            .Find(x => x.StartedAt >= todayStart && x.StartedAt < tomorrow && x.Status == BatchStatus.Running)
+            .Find(filter)
             .SortByDescending(x => x.StartedAt)
             .ToListAsync();
     }

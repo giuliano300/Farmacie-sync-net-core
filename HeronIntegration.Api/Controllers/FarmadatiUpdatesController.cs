@@ -20,9 +20,9 @@ public class FarmadatiUpdatesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Get()
+    public async Task<IActionResult> GetAll(string? customerId = null)
     {
-        var updates = await _repo.FindAsync();
+        var updates = await _repo.FindAsync(customerId);
 
         return Ok(updates);
     }

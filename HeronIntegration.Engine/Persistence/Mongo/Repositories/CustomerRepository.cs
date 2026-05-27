@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Models;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -43,4 +44,17 @@ public class CustomerRepository : ICustomerRepository
 
     public async Task DeleteAsync(string id)
         => await _context.Customers.DeleteOneAsync(x => x.Id == id);
+
+    public async Task<Customer?> Login(Login l)
+    {
+        var user = await _context.Customers
+            .Find(p => p.Password == l.password && p.Email == l.email)
+            .FirstOrDefaultAsync();
+
+        if (user == null)
+            return null;
+
+        return user;
+    }
+
 }

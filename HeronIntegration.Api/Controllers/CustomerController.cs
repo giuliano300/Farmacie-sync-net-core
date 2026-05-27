@@ -164,4 +164,13 @@ public class CustomersController : ControllerBase
             return false;
         }
     }
+
+    [HttpPost("login")]
+    public async Task<Customer> Login(Login req)
+    {
+        var c = await _repo.Login(req);
+
+        return c;
+    }
+
 }

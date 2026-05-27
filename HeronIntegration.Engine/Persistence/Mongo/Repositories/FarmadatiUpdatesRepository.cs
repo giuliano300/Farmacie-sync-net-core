@@ -45,36 +45,69 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
         _managementCacheRepo = managementCacheRepo;
     }
 
-    public async Task<List<FarmadatiUpdatesWithCustomer>> FindAsync()
+    public async Task<List<FarmadatiUpdatesWithCustomer>> FindAsync(string? customerId = null)
     {
+        var filter =
+            string.IsNullOrEmpty(customerId)
+                ? Builders<FarmadatiUpdates>.Filter.Empty
+                : Builders<FarmadatiUpdates>.Filter.Eq(
+                    x => x.CustomerId,
+                    customerId
+                );
+
         var updates = await _context.FarmadatiUpdates
-            .Find(_ => true)
+            .Find(filter)
             .ToListAsync();
 
         if (!updates.Any())
             return new List<FarmadatiUpdatesWithCustomer>();
 
-        // 🔥 prendi tutti gli id cliente distinti
+        /*
+        |--------------------------------------------------------------------------
+        | DISTINCT CUSTOMER IDS
+        |--------------------------------------------------------------------------
+        */
+
         var customerIds = updates
             .Select(x => x.CustomerId)
             .Distinct()
             .ToList();
 
-        // 🔥 UNA SOLA query
-        var customers = await _customerRepository.GetByIdsAsync(customerIds);
+        /*
+        |--------------------------------------------------------------------------
+        | LOAD CUSTOMERS
+        |--------------------------------------------------------------------------
+        */
 
-        // 🔥 dictionary per lookup O(1)
-        var customerDict = customers.ToDictionary(x => x.Id, x => x);
+        var customers = await _customerRepository
+            .GetByIdsAsync(customerIds);
 
-        // 🔥 mapping finale
-        var result = updates.Select(fc => new FarmadatiUpdatesWithCustomer
-        {
-            Customer = customerDict.GetValueOrDefault(fc.CustomerId)!,
-            FarmadatiUpdate = fc
-        }).ToList();
+        /*
+        |--------------------------------------------------------------------------
+        | DICTIONARY
+        |--------------------------------------------------------------------------
+        */
+
+        var customerDict = customers
+            .ToDictionary(x => x.Id, x => x);
+
+        /*
+        |--------------------------------------------------------------------------
+        | MAP
+        |--------------------------------------------------------------------------
+        */
+
+        var result = updates
+            .Select(fc => new FarmadatiUpdatesWithCustomer
+            {
+                Customer = customerDict.GetValueOrDefault(fc.CustomerId)!,
+                FarmadatiUpdate = fc
+            })
+            .ToList();
 
         return result;
     }
+
     public async Task<FarmadatiUpdates?> GetByIdAsync(string id)
     {
         return await _context.FarmadatiUpdates

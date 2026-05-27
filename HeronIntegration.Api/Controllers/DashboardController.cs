@@ -33,11 +33,11 @@ public class DashboardController : ControllerBase
     }
 
     [HttpGet("")]
-    public async Task<DashboardResponse> GetDashboard()
+    public async Task<DashboardResponse> GetDashboard(string? customerId = null)
     {
         try
         {
-            var todayBatches = await _batchRepo.GetTodayAsync();
+            var todayBatches = await _batchRepo.GetTodayAsync(customerId);
 
             var result = new DashboardResponse();
 

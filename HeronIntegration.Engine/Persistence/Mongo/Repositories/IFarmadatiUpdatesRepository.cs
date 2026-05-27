@@ -7,7 +7,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public interface IFarmadatiUpdatesRepository
 {
-    Task<List<FarmadatiUpdatesWithCustomer>?> FindAsync();
+    Task<List<FarmadatiUpdatesWithCustomer>?> FindAsync(string? customerId);
     Task<FarmadatiUpdates?> GetByIdAsync(string id);
 
     Task CreateAsync(FarmadatiUpdates updates, CancellationToken token);

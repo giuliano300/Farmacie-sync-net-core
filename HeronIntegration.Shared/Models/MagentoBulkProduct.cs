@@ -23,6 +23,7 @@ namespace HeronIntegration.Shared.Models
 
         public int qty { get; set; }
         public int vat { get; set; }
+        public string? macroGroup { get; set; }
 
         public int status { get; set; }
 
