@@ -1,4 +1,5 @@
-﻿using HeronIntegration.Engine.External.Farmadati.Enrichment;
+﻿using HeronIntegration.Engine;
+using HeronIntegration.Engine.External.Farmadati.Enrichment;
 using HeronIntegration.Engine.External.Farmadati.Generated;
 using HeronIntegration.Engine.Persistence.Mongo;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
@@ -45,67 +46,13 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
         _managementCacheRepo = managementCacheRepo;
     }
 
-    public async Task<List<FarmadatiUpdatesWithCustomer>> FindAsync(string? customerId = null)
+    public async Task<List<FarmadatiUpdates>> FindAsync()
     {
-        var filter =
-            string.IsNullOrEmpty(customerId)
-                ? Builders<FarmadatiUpdates>.Filter.Empty
-                : Builders<FarmadatiUpdates>.Filter.Eq(
-                    x => x.CustomerId,
-                    customerId
-                );
-
-        var updates = await _context.FarmadatiUpdates
-            .Find(filter)
+        var farmadatiUpdates = await _context.FarmadatiUpdates.Find(_ => true)
             .ToListAsync();
 
-        if (!updates.Any())
-            return new List<FarmadatiUpdatesWithCustomer>();
 
-        /*
-        |--------------------------------------------------------------------------
-        | DISTINCT CUSTOMER IDS
-        |--------------------------------------------------------------------------
-        */
-
-        var customerIds = updates
-            .Select(x => x.CustomerId)
-            .Distinct()
-            .ToList();
-
-        /*
-        |--------------------------------------------------------------------------
-        | LOAD CUSTOMERS
-        |--------------------------------------------------------------------------
-        */
-
-        var customers = await _customerRepository
-            .GetByIdsAsync(customerIds);
-
-        /*
-        |--------------------------------------------------------------------------
-        | DICTIONARY
-        |--------------------------------------------------------------------------
-        */
-
-        var customerDict = customers
-            .ToDictionary(x => x.Id, x => x);
-
-        /*
-        |--------------------------------------------------------------------------
-        | MAP
-        |--------------------------------------------------------------------------
-        */
-
-        var result = updates
-            .Select(fc => new FarmadatiUpdatesWithCustomer
-            {
-                Customer = customerDict.GetValueOrDefault(fc.CustomerId)!,
-                FarmadatiUpdate = fc
-            })
-            .ToList();
-
-        return result;
+        return farmadatiUpdates;
     }
 
     public async Task<FarmadatiUpdates?> GetByIdAsync(string id)
@@ -257,6 +204,24 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
         await _context.FarmadatiUpdates.ReplaceOneAsync(
             x => x.Id == id,
             updates);
+    }
+    public async Task UpdateProgressAsync(string id, int total, int count, string status, DateTime? endedAt)
+    {
+        var update =
+        Builders<FarmadatiUpdates>.Update
+            .Set(x => x.productNumber, total)
+            .Set(x => x.productWorked, count)
+            .Set(x => x.Status, status);
+        if (endedAt != null)
+        {
+            update = update.Set(
+                x => x.EndedAt,
+                endedAt.Value);
+        }
+
+        await _context.FarmadatiUpdates.UpdateOneAsync(
+            x => x.Id == id,
+            update);
     }
 
     public async Task DeleteAsync(string id)

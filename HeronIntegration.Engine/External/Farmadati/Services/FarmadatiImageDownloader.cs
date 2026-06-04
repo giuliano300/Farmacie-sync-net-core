@@ -51,4 +51,38 @@ public class FarmadatiImageDownloader
         return null;
 
     }
+
+    public async Task<(byte[] Bytes, string MimeType)?> DownloadAsync(
+    string datasetCode,
+    string fileName)
+    {
+        try
+        {
+            var url =
+                $"{_endpoint}" +
+                $"?accesskey={_password}" +
+                $"&tipodoc={datasetCode}" +
+                $"&nomefile={fileName}";
+
+            var response = await _httpClient.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+
+            if (bytes.Length == 0)
+                return null;
+
+            var mime =
+                response.Content.Headers.ContentType?.MediaType
+                ?? "image/jpeg";
+
+            return (bytes, mime);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

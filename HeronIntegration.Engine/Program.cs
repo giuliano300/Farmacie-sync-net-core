@@ -1,6 +1,7 @@
 using HeronIntegration.Engine;
 using HeronIntegration.Engine.External.Farmadati;
 using HeronIntegration.Engine.External.Farmadati.Enrichment;
+using HeronIntegration.Engine.External.Farmadati.FullImportNew;
 using HeronIntegration.Engine.External.Farmadati.Interfaces;
 using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo;
@@ -143,6 +144,9 @@ builder.Services.AddSingleton<BatchProcessManager>();
 builder.Services.AddScoped<IFarmadatiUpdatesRepository, FarmadatiUpdatesRepository>();
 
 builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
+
+builder.Services.AddScoped<IFarmadatiFullImportJob, FarmadatiFullImportJob>();
+
 
 var host = builder.Build();
 host.Run();

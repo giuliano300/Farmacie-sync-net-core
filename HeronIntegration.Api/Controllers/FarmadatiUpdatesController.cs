@@ -1,4 +1,5 @@
-﻿using HeronIntegration.Engine.Persistence.Mongo.Documents;
+﻿using HeronIntegration.Engine.External.Farmadati.FullImportNew;
+using HeronIntegration.Engine.Persistence.Mongo.Documents;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
@@ -11,18 +12,20 @@ using MongoDB.Bson;
 public class FarmadatiUpdatesController : ControllerBase
 {
     private readonly IFarmadatiUpdatesRepository _repo;
+    private readonly IFarmadatiFullImportJob _job;
     private readonly BatchProcessManager _processManager;
 
-    public FarmadatiUpdatesController(IFarmadatiUpdatesRepository repo, BatchProcessManager processManager)
+    public FarmadatiUpdatesController(IFarmadatiUpdatesRepository repo, BatchProcessManager processManager, IFarmadatiFullImportJob job)
     {
         _repo = repo;
         _processManager = processManager;
+        _job = job;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll(string? customerId = null)
+    public async Task<IActionResult> GetAll()
     {
-        var updates = await _repo.FindAsync(customerId);
+        var updates = await _repo.FindAsync();
 
         return Ok(updates);
     }
@@ -36,6 +39,30 @@ public class FarmadatiUpdatesController : ControllerBase
             return NotFound();
 
             return Ok(update);
+    }
+
+    [HttpPost("import-full")]
+    public async Task<IActionResult> ImportFull()
+    {
+        try
+        {
+            await _job.ExecuteAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Message = "Import Farmadati completato"
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                ex.Message,
+                InnerException = ex.InnerException?.Message
+            });
+        }
     }
 
     [HttpPost]

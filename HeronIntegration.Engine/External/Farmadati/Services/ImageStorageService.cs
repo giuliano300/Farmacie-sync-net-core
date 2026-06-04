@@ -82,4 +82,27 @@ public class ImageStorageService
             destination,
             token);
     }
+
+    public async Task<Dictionary<string, ObjectId>> GetAllFilesAsync()
+    {
+        var result = new Dictionary<string, ObjectId>();
+
+        using var cursor =
+            await _bucket.FindAsync(
+                Builders<GridFSFileInfo>.Filter.Empty);
+
+        var files = await cursor.ToListAsync();
+
+        foreach (var file in files)
+        {
+            if (!result.ContainsKey(file.Filename))
+            {
+                result.Add(
+                    file.Filename,
+                    file.Id);
+            }
+        }
+
+        return result;
+    }
 }

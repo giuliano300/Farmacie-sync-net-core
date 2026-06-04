@@ -14,7 +14,8 @@ namespace HeronIntegration.Shared.Entities
         [BsonRepresentation(BsonType.ObjectId)]
         public string? Id { get; set; }
 
-        public string CustomerId { get; set; }
+        public string? CustomerId { get; set; }
+        public string? Status { get; set; }
         public int? productNumber { get; set; }
 
         public int? productWorked { get; set; }

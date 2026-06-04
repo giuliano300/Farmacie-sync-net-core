@@ -1,6 +1,7 @@
 using HeronIntegration.Engine;
 using HeronIntegration.Engine.External.Farmadati;
 using HeronIntegration.Engine.External.Farmadati.Enrichment;
+using HeronIntegration.Engine.External.Farmadati.FullImportNew;
 using HeronIntegration.Engine.External.Farmadati.Interfaces;
 using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo;
@@ -186,6 +187,8 @@ builder.Services.AddHttpClient<IMagentoExporter, MagentoExporter>();
 builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
 
 builder.Services.AddScoped<IImportToMagentoStatusRepository, ImportToMagentoStatusRepository>();
+
+builder.Services.AddScoped<IFarmadatiFullImportJob, FarmadatiFullImportJob>();
 
 builder.Services.AddCors(options =>
 {
