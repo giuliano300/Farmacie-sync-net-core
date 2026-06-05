@@ -10,6 +10,7 @@ using HeronIntegration.Engine.StepProcessors;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Engine.Suppliers;
 using HeronIntegration.Engine.Workers;
+using HeronIntegration.Shared.Singletons;
 using HeronSync.Infrastructure.Farmadati.Providers;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -147,6 +148,7 @@ builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
 
 builder.Services.AddScoped<IFarmadatiFullImportJob, FarmadatiFullImportJob>();
 
+builder.Services.AddSingleton<FarmadatiJobManager>();
 
 var host = builder.Build();
 host.Run();

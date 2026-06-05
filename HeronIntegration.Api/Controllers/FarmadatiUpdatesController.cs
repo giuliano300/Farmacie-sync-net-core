@@ -4,6 +4,7 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
+using HeronIntegration.Shared.Singletons;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 
@@ -14,12 +15,14 @@ public class FarmadatiUpdatesController : ControllerBase
     private readonly IFarmadatiUpdatesRepository _repo;
     private readonly IFarmadatiFullImportJob _job;
     private readonly BatchProcessManager _processManager;
+    private readonly FarmadatiJobManager _jobManager;
 
-    public FarmadatiUpdatesController(IFarmadatiUpdatesRepository repo, BatchProcessManager processManager, IFarmadatiFullImportJob job)
+    public FarmadatiUpdatesController(IFarmadatiUpdatesRepository repo, BatchProcessManager processManager, IFarmadatiFullImportJob job, FarmadatiJobManager jobManager)
     {
         _repo = repo;
         _processManager = processManager;
         _job = job;
+        _jobManager = jobManager;
     }
 
     [HttpGet]
@@ -44,25 +47,33 @@ public class FarmadatiUpdatesController : ControllerBase
     [HttpPost("import-full")]
     public async Task<IActionResult> ImportFull()
     {
-        try
-        {
-            await _job.ExecuteAsync();
+        if (_jobManager.IsRunning)
+            return BadRequest("Import già in esecuzione");
 
-            return Ok(new
-            {
-                Success = true,
-                Message = "Import Farmadati completato"
-            });
-        }
-        catch (Exception ex)
+        _jobManager.CancellationTokenSource = new CancellationTokenSource();
+
+        _ = Task.Run(async () =>
         {
-            return BadRequest(new
+            try
             {
-                Success = false,
-                ex.Message,
-                InnerException = ex.InnerException?.Message
-            });
-        }
+                await _job.ExecuteAsync(_jobManager.CancellationTokenSource.Token);
+            }
+            catch (Exception ex)
+            {
+                   
+            }
+            finally
+            {
+                _jobManager.CancellationTokenSource?.Dispose();
+                _jobManager.CancellationTokenSource = null;
+            }
+        });
+
+        return Ok(new
+        {
+            Success = true,
+            Message = "Import Farmadati avviato"
+        });
     }
 
     [HttpPost]
@@ -101,6 +112,10 @@ public class FarmadatiUpdatesController : ControllerBase
         try
         {
             await _repo.DeleteAsync(id);
+
+            if (_jobManager.IsRunning)
+                _jobManager.CancellationTokenSource?.Cancel();
+           
             return true;
         }
         catch (Exception e)

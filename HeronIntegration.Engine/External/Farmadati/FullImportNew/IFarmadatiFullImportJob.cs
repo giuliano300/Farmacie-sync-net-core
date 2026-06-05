@@ -8,6 +8,6 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 {
     public interface IFarmadatiFullImportJob
     {
-        Task ExecuteAsync();
+        Task ExecuteAsync(CancellationToken cancellationToken);
     }
 }

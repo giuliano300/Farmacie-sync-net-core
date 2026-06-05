@@ -215,29 +215,4 @@ public class FarmadatiTestController : ControllerBase
         public string Aic { get; set; }
     }
 
-
-    [HttpPost("import-full")]
-    public async Task<IActionResult> ImportFull()
-    {
-        try
-        {
-            await _importJob.ExecuteAsync();
-
-            return Ok(new
-            {
-                Success = true,
-                Message = "Import Farmadati completato"
-            });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new
-            {
-                Success = false,
-                ex.Message,
-                InnerException = ex.InnerException?.Message
-            });
-        }
-    }
-
 };

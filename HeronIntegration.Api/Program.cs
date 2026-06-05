@@ -9,6 +9,7 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Engine.StepProcessors;
 using HeronIntegration.Engine.Steps;
 using HeronIntegration.Engine.Suppliers;
+using HeronIntegration.Shared.Singletons;
 using HeronSync.Infrastructure.Farmadati.Providers;
 using MongoDB.Driver;
 using Serilog;
@@ -31,11 +32,24 @@ builder.Services.AddSingleton(sp =>
 // Logger
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
-    .WriteTo.File(
-        "C:\\inetpub\\wwwroot\\logs\\log-.txt",
-        rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 7
-    )
+    .WriteTo.Logger(lc => lc
+        .Filter.ByExcluding(evt =>
+            evt.Properties.ContainsKey("ImportType") &&
+            evt.Properties["ImportType"].ToString().Contains("Farmadati"))
+        .WriteTo.File(
+            @"C:\inetpub\wwwroot\logs\application-.txt",
+            rollingInterval: RollingInterval.Day))
+
+    // Log Farmadati
+    .WriteTo.Logger(lc => lc
+        .Filter.ByIncludingOnly(evt =>
+            evt.Properties.ContainsKey("SourceContext") &&
+            evt.Properties["SourceContext"]
+                .ToString()
+                .Contains("Farmadati"))
+        .WriteTo.File(
+            @"C:\inetpub\wwwroot\logs\farmadati-import-.txt",
+            rollingInterval: RollingInterval.Day))
     .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -189,6 +203,8 @@ builder.Services.AddScoped<IBatchManagerService, BatchManagerService>();
 builder.Services.AddScoped<IImportToMagentoStatusRepository, ImportToMagentoStatusRepository>();
 
 builder.Services.AddScoped<IFarmadatiFullImportJob, FarmadatiFullImportJob>();
+
+builder.Services.AddSingleton<FarmadatiJobManager>();
 
 builder.Services.AddCors(options =>
 {
