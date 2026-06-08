@@ -13,6 +13,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using Serilog.Context;
+using HeronIntegration.Shared.Enums;
 
 namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 {
@@ -53,7 +54,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             _rootPath = configuration["Farmadati:RootPath"]!;
         }
 
-        public async Task ExecuteAsync(CancellationToken cancellationToken)
+        public async Task ExecuteAsync(ImportType importType, CancellationToken cancellationToken)
         {
             using (LogContext.PushProperty("ImportType", "Farmadati"))
             {
@@ -198,7 +199,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         totalProducts,
                         worked,
                         "Inizio import", null);
-
+                     
                     foreach (var batch in products.Values.Chunk(5000))
                     {
                         try
@@ -229,70 +230,106 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
                     await _updatesRepository.UpdateProgressAsync(
                         updateId!,
-                        totalProducts,
+                        worked,
                         totalProducts,
                         "Import completato", null);
 
                     products.Clear();
+                    if (importType == ImportType.ProductsOnly)
+                    {
+                        swInit.Stop();
+                        _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+                        return;
+                    }
 
+                    //DESCRIZIONI
+                    if (importType == ImportType.ProductAndDescription || importType == ImportType.Full)
+                    {
+                        //INSERIMENTO DESCRIZIONE LUNGA
+                        sw = Stopwatch.StartNew();
+                        await _updatesRepository.UpdateProgressAsync(
+                            updateId!,
+                            totalProducts,
+                            totalProducts,
+                            "Inserimento descrizione lunga", null);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await MergeTe008Async(te008Xml, cancellationToken);
+                        sw.Stop();
+                        _logger.LogInformation("Inserimento descrizione lunga completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
 
-                    //INSERIMENTO DESCRIZIONE LUNGA
-                    sw = Stopwatch.StartNew();
-                    await _updatesRepository.UpdateProgressAsync(
-                        updateId!,
-                        totalProducts,
-                        totalProducts,
-                        "Inserimento descrizione lunga", null);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await MergeTe008Async(te008Xml, cancellationToken);
-                    sw.Stop();
-                    _logger.LogInformation("Inserimento descrizione lunga completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+                        //INSERIMENTO DESCRIZIONE BREVE
+                        sw = Stopwatch.StartNew();
+                        await _updatesRepository.UpdateProgressAsync(
+                            updateId!,
+                            totalProducts,
+                            totalProducts,
+                            "Inserimento descrizione breve", null);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await MergeTr039Async(tr039Xml, cancellationToken);
+                        sw.Stop();
+                        _logger.LogInformation("Inserimento descrizione breve completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
 
-                    //INSERIMENTO DESCRIZIONE BREVE
-                    sw = Stopwatch.StartNew();
-                    await _updatesRepository.UpdateProgressAsync(
-                        updateId!,
-                        totalProducts,
-                        totalProducts,
-                        "Inserimento descrizione breve", null);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await MergeTr039Async(tr039Xml, cancellationToken);
-                    sw.Stop();
-                    _logger.LogInformation("Inserimento descrizione breve completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+                        if (importType == ImportType.ProductAndDescription)
+                        {
+                            swInit.Stop();
+                            _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+                            return;
+                        }
+                    }
 
                     //INSERIMENTO MACRO GRUOP CODE
-                    sw = Stopwatch.StartNew();
-                    await _updatesRepository.UpdateProgressAsync(
-                        updateId!,
-                        totalProducts,
-                        totalProducts,
-                        "Inserimento codice macro group", null);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await MergeTr036Async(tr036Xml, cancellationToken);
-                    sw.Stop();
-                    _logger.LogInformation("Inserimento codice macro group completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+                    if (importType == ImportType.ProductAndMacroCode || importType == ImportType.Full)
+                    {
 
+                        sw = Stopwatch.StartNew();
+                        await _updatesRepository.UpdateProgressAsync(
+                            updateId!,
+                            totalProducts,
+                            totalProducts,
+                            "Inserimento codice macro group", null);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await MergeTr036Async(tr036Xml, cancellationToken);
+                        sw.Stop();
+                        _logger.LogInformation("Inserimento codice macro group completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+
+                        if (importType == ImportType.ProductAndMacroCode)
+                        {
+                            swInit.Stop();
+                            _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+                            return;
+                        }
+                    }
 
                     //INSERIMENTO IMMAGINI
                     //IMMAGINI ESISTENTI
-                    sw = Stopwatch.StartNew();
-                    var existingFiles = await _imageStorage.GetAllFilesAsync();
-                    await _updatesRepository.UpdateProgressAsync(
-                        updateId!,
-                        totalProducts,
-                        totalProducts,
-                        "Inserimento immagini", null);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await MergeTe004Async(te004Xml, existingFiles, cancellationToken);
-                    sw.Stop();
-                    _logger.LogInformation("Inserimento immagini Te004 completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+                    if (importType == ImportType.ProductAndImages || importType == ImportType.Full)
+                    {
+                        sw = Stopwatch.StartNew();
+                        var existingFiles = await _imageStorage.GetAllFilesAsync();
+                        await _updatesRepository.UpdateProgressAsync(
+                            updateId!,
+                            totalProducts,
+                            totalProducts,
+                            "Inserimento immagini", null);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await MergeTe004Async(te004Xml, existingFiles, cancellationToken);
+                        sw.Stop();
+                        _logger.LogInformation("Inserimento immagini Te004 completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
 
-                    sw = Stopwatch.StartNew();
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await MergeTe009Async(te009Xml, existingFiles, cancellationToken);
-                    sw.Stop();
-                    _logger.LogInformation("Inserimento immagini Te009 completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+                        sw = Stopwatch.StartNew();
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await MergeTe009Async(te009Xml, existingFiles, cancellationToken);
+                        sw.Stop();
+                        _logger.LogInformation("Inserimento immagini Te009 completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
 
+
+
+                        if (importType == ImportType.ProductAndImages)
+                        {
+                            _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+                            return;
+                        }
+                    }
 
                     await _updatesRepository.UpdateProgressAsync(
                         updateId!,
@@ -342,6 +379,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             var updates =
                 new List<WriteModel<FarmadatiCache>>();
 
+            int merged = 0;
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -409,10 +447,14 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
                     if (updates.Count >= 100)
                     {
+                        merged += updates.Count;
                         await _cache.BulkWriteAsync(
                             updates);
 
                         updates.Clear();
+
+                        _logger.LogInformation("Merge Te0004 prodotti: {Count}", merged);
+
                     }
                 }
                 catch (Exception ex)
@@ -428,8 +470,11 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                 
                 try
                 {
+                    merged += updates.Count;
                     await _cache.BulkWriteAsync(
                         updates);
+
+                    _logger.LogInformation("Merge Te0004 prodotti: {Count}", merged);
                 }
                 catch (Exception ex)
                 {
@@ -446,6 +491,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             var updates =
                 new List<WriteModel<FarmadatiCache>>();
 
+            int merged = 0;
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -514,10 +560,14 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
                     if (updates.Count >= 100)
                     {
+                        merged += updates.Count;
                         await _cache.BulkWriteAsync(
                             updates);
 
                         updates.Clear();
+
+                        _logger.LogInformation("Merge Te0009 prodotti: {Count}", merged);
+
                     }
                 }
                 catch (Exception ex)
@@ -531,10 +581,13 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             {
                 try 
                 {
+                    merged += updates.Count;
                     cancellationToken.ThrowIfCancellationRequested();
                     
                     await _cache.BulkWriteAsync(
                         updates);
+
+                    _logger.LogInformation("Merge Te0009 prodotti: {Count}", merged);
                 }
                 catch (Exception ex)
                 {
@@ -548,6 +601,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
         {
             var updates = new List<WriteModel<FarmadatiCache>>();
 
+            int merged = 0;
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -576,8 +630,9 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
                     if (updates.Count >= 1000)
                     {
+                        merged += updates.Count;
                         _logger.LogInformation(
-                            "Merge Te008 prodotti: {Count}", updates.Count);
+                            "Merge Te008 prodotti: {Count}", merged);
 
                         await _cache.BulkWriteAsync(updates);
                         updates.Clear();
@@ -594,10 +649,11 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             {
                 try
                 {
+                    merged += updates.Count;
                     cancellationToken.ThrowIfCancellationRequested();
 
                     _logger.LogInformation(
-                        "Merge Te008 prodotti: {Count}", updates.Count);
+                        "Merge Te008 prodotti: {Count}", merged);
 
                     await _cache.BulkWriteAsync(updates);
 
@@ -613,7 +669,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
         private async Task MergeTr039Async(string xmlPath, CancellationToken cancellationToken)
         {
             var updates = new List<WriteModel<FarmadatiCache>>();
-
+            int merged = 0;
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -641,7 +697,8 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
                     if (updates.Count >= 1000)
                     {
-                        _logger.LogInformation("Merge Tr039 prodotti: {Count}", updates.Count);
+                        merged += updates.Count;
+                        _logger.LogInformation("Merge Tr039 prodotti: {Count}", merged);
                         
                         await _cache.BulkWriteAsync(updates);
                         updates.Clear();
@@ -657,7 +714,8 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             {
                 try 
                 {
-                    _logger.LogInformation("Merge Tr039 prodotti: {Count}", updates.Count);
+                    merged += updates.Count;
+                    _logger.LogInformation("Merge Tr039 prodotti: {Count}", merged);
 
                     cancellationToken.ThrowIfCancellationRequested();
                     await _cache.BulkWriteAsync(updates);
@@ -675,6 +733,7 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
         {
             var updates = new List<WriteModel<FarmadatiCache>>();
 
+            int merged = 0;
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -702,7 +761,8 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
                     if (updates.Count >= 1000)
                     {
-                        _logger.LogInformation("Merge Tr036 prodotti: {Count}", updates.Count);
+                        merged += updates.Count;
+                        _logger.LogInformation("Merge Tr036 prodotti: {Count}", merged);
                         await _cache.BulkWriteAsync(updates);
                         updates.Clear();
                     }
@@ -717,7 +777,8 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
             {
                 try
                 {
-                    _logger.LogInformation("Merge Tr036 prodotti: {Count}", updates.Count);
+                    merged += updates.Count;
+                    _logger.LogInformation("Merge Tr036 prodotti: {Count}", merged);
 
                     cancellationToken.ThrowIfCancellationRequested();
                     await _cache.BulkWriteAsync(updates);
@@ -814,8 +875,6 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         UpdatedAt = DateTime.UtcNow,
                         DatasetDate = DateTime.UtcNow
                     };
-
-                    _logger.LogInformation("Loaded product TE001: {Aic} - {Name}", code, record.GetValueOrDefault("FDI_0004") ?? "");
                 }
                 catch (Exception ex)
                 {
@@ -852,8 +911,6 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                     };
 
                     products[aic] = product;
-
-                    _logger.LogInformation("Loaded product TE002: {Aic} - {Name}", aic, record.GetValueOrDefault("FDI_0004") ?? "");
                 }
                 catch (Exception ex)
                 {
@@ -884,8 +941,6 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         UpdatedAt = DateTime.UtcNow,
                         DatasetDate = DateTime.UtcNow
                     };
-
-                    _logger.LogInformation("Loaded product TE006: {Aic} - {Name}", code, record.GetValueOrDefault("FDI_0004") ?? "");
                 }
                 catch (Exception ex)
                 {
@@ -914,7 +969,6 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         UpdatedAt = DateTime.UtcNow,
                         DatasetDate = DateTime.UtcNow
                     };
-                    _logger.LogInformation("Loaded product TE011: {Aic} - {Name}", code, record.GetValueOrDefault("FDI_0004") ?? "");
                 }
                 catch (Exception ex)
                 {
@@ -944,7 +998,6 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         UpdatedAt = DateTime.UtcNow,
                         DatasetDate = DateTime.UtcNow
                     };
-                    _logger.LogInformation("Loaded product TE015: {Aic} - {Name}", code, record.GetValueOrDefault("FDI_0004") ?? "");
                 }
                 catch (Exception ex)
                 {

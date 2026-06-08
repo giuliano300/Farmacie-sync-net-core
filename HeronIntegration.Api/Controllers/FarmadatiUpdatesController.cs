@@ -45,7 +45,7 @@ public class FarmadatiUpdatesController : ControllerBase
     }
 
     [HttpPost("import-full")]
-    public async Task<IActionResult> ImportFull()
+    public async Task<IActionResult> ImportFull(ImportType importType = ImportType.Full)
     {
         if (_jobManager.IsRunning)
             return BadRequest("Import già in esecuzione");
@@ -56,7 +56,7 @@ public class FarmadatiUpdatesController : ControllerBase
         {
             try
             {
-                await _job.ExecuteAsync(_jobManager.CancellationTokenSource.Token);
+                await _job.ExecuteAsync(importType, _jobManager.CancellationTokenSource.Token);
             }
             catch (Exception ex)
             {

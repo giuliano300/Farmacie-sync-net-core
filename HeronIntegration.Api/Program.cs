@@ -31,25 +31,25 @@ builder.Services.AddSingleton(sp =>
 
 // Logger
 Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
     .MinimumLevel.Debug()
+
     .WriteTo.Logger(lc => lc
         .Filter.ByExcluding(evt =>
-            evt.Properties.ContainsKey("ImportType") &&
-            evt.Properties["ImportType"].ToString().Contains("Farmadati"))
+            evt.Properties.TryGetValue("ImportType", out var value) &&
+            value.ToString().Trim('"') == "Farmadati")
         .WriteTo.File(
             @"C:\inetpub\wwwroot\logs\application-.txt",
             rollingInterval: RollingInterval.Day))
 
-    // Log Farmadati
     .WriteTo.Logger(lc => lc
         .Filter.ByIncludingOnly(evt =>
-            evt.Properties.ContainsKey("SourceContext") &&
-            evt.Properties["SourceContext"]
-                .ToString()
-                .Contains("Farmadati"))
+            evt.Properties.TryGetValue("ImportType", out var value) &&
+            value.ToString().Trim('"') == "Farmadati")
         .WriteTo.File(
             @"C:\inetpub\wwwroot\logs\farmadati-import-.txt",
             rollingInterval: RollingInterval.Day))
+
     .CreateLogger();
 
 builder.Host.UseSerilog();
