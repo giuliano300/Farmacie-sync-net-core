@@ -239,6 +239,13 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                     {
                         swInit.Stop();
                         _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+
+                        await _updatesRepository.UpdateProgressAsync(
+                               updateId!,
+                               totalProducts,
+                               totalProducts,
+                               "Completed", DateTime.Now);
+
                         return;
                     }
 
@@ -273,6 +280,13 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         {
                             swInit.Stop();
                             _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+
+                            await _updatesRepository.UpdateProgressAsync(
+                                   updateId!,
+                                   totalProducts,
+                                   totalProducts,
+                                   "Completed", DateTime.Now);
+
                             return;
                         }
                     }
@@ -296,6 +310,13 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         {
                             swInit.Stop();
                             _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+
+                            await _updatesRepository.UpdateProgressAsync(
+                                   updateId!,
+                                   totalProducts,
+                                   totalProducts,
+                                   "Completed", DateTime.Now);
+
                             return;
                         }
                     }
@@ -327,6 +348,13 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         if (importType == ImportType.ProductAndImages)
                         {
                             _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
+
+                            await _updatesRepository.UpdateProgressAsync(
+                                   updateId!,
+                                   totalProducts,
+                                   totalProducts,
+                                   "Completed", DateTime.Now);
+
                             return;
                         }
                     }
