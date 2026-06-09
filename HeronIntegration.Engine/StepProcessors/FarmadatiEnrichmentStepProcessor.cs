@@ -75,7 +75,6 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
                     continue;
 
                 EnrichedProduct enriched;
-                EnrichedProduct? enrichment = null;
 
                 if (cacheDict.TryGetValue(raw.Aic, out var cache))
                 {
@@ -87,44 +86,14 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
                 }
                 else
                 {
-
-                    try
+                    var managementCache = new ManagementCache
                     {
-                        enrichment = await _enrichmentService.EnrichAsync(
-                            raw.Aic,
-                            raw.CustomerId,
-                            batchId);
-                    }
-                    catch 
-                    {
-                        
-                    }
+                        Aic = raw.Aic,
+                        CachedAt = DateTime.UtcNow
+                    };
+                    await _managementCacheRepo.InsertAsync(managementCache);
 
-                    if(enrichment != null)
-                    {
-                        var cached = new FarmadatiCache
-                        {
-                            Aic = enrichment.Aic,
-                            Name = enrichment.Name,
-                            ShortDescription = enrichment.ShortDescription!,
-                            LongDescription = enrichment.LongDescription!,
-                            Images = enrichment.Images,
-                            CachedAt = DateTime.UtcNow
-                        };
-                        await _farmadatiCacheRepo.InsertAsync(cached);
-                    }
-                    else
-                    {
-                        var managementCache = new ManagementCache
-                        {
-                            Aic = raw.Aic,
-                            CachedAt = DateTime.UtcNow
-                        };
-                        await _managementCacheRepo.InsertAsync(managementCache);
-
-                    }
-
-                    enriched = enrichment ?? EnrichedProduct.CreateMinimal(raw, batchId);
+                    enriched = EnrichedProduct.CreateMinimal(raw, batchId);
 
                 }
 
