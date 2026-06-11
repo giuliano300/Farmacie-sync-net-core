@@ -1,10 +1,13 @@
 ﻿using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using HeronIntegration.Shared.Enums;
 using MongoDB.Bson;
 using MongoDB.Driver;
+using Serilog.Context;
 using ServiceReference1;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Compression;
@@ -12,8 +15,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
-using Serilog.Context;
-using HeronIntegration.Shared.Enums;
 
 namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 {
@@ -326,22 +327,52 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                     if (importType == ImportType.ProductAndImages || importType == ImportType.Full)
                     {
                         sw = Stopwatch.StartNew();
-                        var existingFiles = await _imageStorage.GetAllFilesAsync();
+
+                        var existingFiles =
+                            new ConcurrentDictionary<string, ObjectId>(
+                                await _imageStorage.GetAllFilesAsync());
+
                         await _updatesRepository.UpdateProgressAsync(
                             updateId!,
                             totalProducts,
                             totalProducts,
-                            "Inserimento immagini", null);
-                        cancellationToken.ThrowIfCancellationRequested();
-                        await MergeTe004Async(te004Xml, existingFiles, cancellationToken);
-                        sw.Stop();
-                        _logger.LogInformation("Inserimento immagini Te004 completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+                            "Inserimento immagini",
+                            null);
 
-                        sw = Stopwatch.StartNew();
                         cancellationToken.ThrowIfCancellationRequested();
-                        await MergeTe009Async(te009Xml, existingFiles, cancellationToken);
+
+                        await MergeImagesAsync(
+                            te004Xml,
+                            "TE004",
+                            "FDI_T456",
+                            "FDI_T459",
+                            existingFiles,
+                            cancellationToken);
+
                         sw.Stop();
-                        _logger.LogInformation("Inserimento immagini Te009 completato in {Seconds} secondi", sw.Elapsed.TotalSeconds);
+
+                        _logger.LogInformation(
+                            "Inserimento immagini TE004 completato in {Seconds} secondi",
+                            sw.Elapsed.TotalSeconds);
+
+
+                        sw.Restart();
+
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        await MergeImagesAsync(
+                            te009Xml,
+                            "TE009",
+                            "FDI_0840",
+                            "FDI_0843",
+                            existingFiles,
+                            cancellationToken);
+
+                        sw.Stop();
+
+                        _logger.LogInformation(
+                            "Inserimento immagini TE009 completato in {Seconds} secondi",
+                            sw.Elapsed.TotalSeconds);
 
 
 
@@ -359,13 +390,13 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                         }
                     }
 
+                    swInit.Stop();
+
                     await _updatesRepository.UpdateProgressAsync(
                         updateId!,
                         totalProducts,
                         totalProducts,
                         "Completed", DateTime.Now);
-
-                    swInit.Stop();
 
                     _logger.LogInformation("Importazione completata in {Seconds} secondi. UpdateId: {UpdateId}", swInit.Elapsed.TotalSeconds, updateId);
                 }
@@ -402,22 +433,36 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
 
         private async Task MergeTe004Async(
             string xmlPath,
-            Dictionary<string, ObjectId> existingFiles, CancellationToken cancellationToken)
+            Dictionary<string, ObjectId> existingFiles,
+            CancellationToken cancellationToken)
         {
-            var updates =
-                new List<WriteModel<FarmadatiCache>>();
+            var updates = new List<WriteModel<FarmadatiCache>>();
 
             int merged = 0;
+            int processed = 0;
+            int downloaded = 0;
+            int skipped = 0;
+            int errors = 0;
+
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                processed++;
+
                 try
                 {
                     if (!record.TryGetValue("FDI_T456", out var aic))
+                    {
+                        skipped++;
                         continue;
+                    }
 
                     if (!record.TryGetValue("FDI_T459", out var fileName))
+                    {
+                        skipped++;
                         continue;
+                    }
 
                     ObjectId fileId;
 
@@ -429,30 +474,37 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                     }
                     else
                     {
-                        var image =
-                            await _imageDownloader.DownloadAsync(
-                                "TE004",
-                                fileName);
+                        _logger.LogDebug(
+                            "Download TE004: {FileName}",
+                            fileName);
+
+                        var image = await _imageDownloader.DownloadAsync(
+                            "TE004",
+                            fileName,
+                            cancellationToken);
 
                         if (image == null)
+                        {
+                            skipped++;
                             continue;
+                        }
 
-                        fileId =
-                            await _imageStorage.SaveAsync(
-                                fileName,
-                                image.Value.Bytes,
-                                image.Value.MimeType);
+                        fileId = await _imageStorage.SaveAsync(
+                            fileName,
+                            image.Value.Bytes,
+                            image.Value.MimeType);
 
                         existingFiles[fileName] = fileId;
+
+                        downloaded++;
                     }
 
-                    var productImage =
-                        new ProductImage
-                        {
-                            GridFsId = fileId,
-                            AltText = fileName,
-                            Type = "Farmadati"
-                        };
+                    var productImage = new ProductImage
+                    {
+                        GridFsId = fileId,
+                        AltText = fileName,
+                        Type = "Farmadati"
+                    };
 
                     var filter = Builders<FarmadatiCache>.Filter.And(
                         Builders<FarmadatiCache>.Filter.Eq(
@@ -473,64 +525,102 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                             filter,
                             update));
 
-                    if (updates.Count >= 100)
+                    if (updates.Count >= 500)
                     {
+                        await _cache.BulkWriteAsync(updates);
+
                         merged += updates.Count;
-                        await _cache.BulkWriteAsync(
-                            updates);
 
                         updates.Clear();
 
-                        _logger.LogInformation("Merge Te0004 prodotti: {Count}", merged);
+                        _logger.LogInformation(
+                            "TE004 - Processati={Processed} Downloadati={Downloaded} Merge={Merged}",
+                            processed,
+                            downloaded,
+                            merged);
+                    }
 
+                    if (processed % 1000 == 0)
+                    {
+                        _logger.LogInformation(
+                            "TE004 progress: {Processed} record elaborati",
+                            processed);
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Log dell'errore, ma continua con il prossimo record
-                    //Console.WriteLine($"Errore durante l'elaborazione del record: {ex.Message}");
+                    errors++;
+
+                    _logger.LogError(
+                        ex,
+                        "Errore TE004. AIC={Aic} File={FileName}",
+                        record.TryGetValue("FDI_T456", out var a) ? a : "N/A",
+                        record.TryGetValue("FDI_T459", out var f) ? f : "N/A");
                 }
             }
 
             if (updates.Count > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                
+
                 try
                 {
-                    merged += updates.Count;
-                    await _cache.BulkWriteAsync(
-                        updates);
+                    await _cache.BulkWriteAsync(updates);
 
-                    _logger.LogInformation("Merge Te0004 prodotti: {Count}", merged);
+                    merged += updates.Count;
+
+                    updates.Clear();
                 }
                 catch (Exception ex)
                 {
-                    // Log dell'errore
-                    //Console.WriteLine($"Errore durante il BulkWriteAsync: {ex.Message}"); 
+                    errors++;
+
+                    _logger.LogError(
+                        ex,
+                        "Errore BulkWrite finale TE004");
                 }
             }
-        }
 
+            _logger.LogInformation(
+                "TE004 completato. Processati={Processed} Downloadati={Downloaded} Saltati={Skipped} Errori={Errors} Merge={Merged}",
+                processed,
+                downloaded,
+                skipped,
+                errors,
+                merged);
+        }
         private async Task MergeTe009Async(
             string xmlPath,
             Dictionary<string, ObjectId> existingFiles, CancellationToken cancellationToken)
         {
-            var updates =
-                new List<WriteModel<FarmadatiCache>>();
 
+            var updates = new List<WriteModel<FarmadatiCache>>();
+
+            int processed = 0;
+            int downloaded = 0;
+            int skipped = 0;
+            int errors = 0;
             int merged = 0;
+
             foreach (var record in ReadRecords(xmlPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                try 
-                { 
+                processed++;
+
+                try
+                {
                     if (!record.TryGetValue("FDI_0840", out var aic))
+                    {
+                        skipped++;
                         continue;
+                    }
 
                     if (!record.TryGetValue("FDI_0843", out var fileName))
+                    {
+                        skipped++;
                         continue;
+                    }
 
                     ObjectId fileId;
 
@@ -542,30 +632,37 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                     }
                     else
                     {
-                        var image =
-                            await _imageDownloader.DownloadAsync(
-                                "TE009",
-                                fileName);
+                        _logger.LogDebug(
+                            "Download immagine {FileName}",
+                        fileName);
+
+                        var image = await _imageDownloader.DownloadAsync(
+                            "TE009",
+                            fileName,
+                            cancellationToken);
 
                         if (image == null)
+                        {
+                            skipped++;
                             continue;
+                        }
 
-                        fileId =
-                            await _imageStorage.SaveAsync(
-                                fileName,
-                                image.Value.Bytes,
-                                image.Value.MimeType);
+                        fileId = await _imageStorage.SaveAsync(
+                            fileName,
+                            image.Value.Bytes,
+                            image.Value.MimeType);
 
                         existingFiles[fileName] = fileId;
+
+                        downloaded++;
                     }
 
-                    var productImage =
-                        new ProductImage
-                        {
-                            GridFsId = fileId,
-                            AltText = fileName,
-                            Type = "Farmadati"
-                        };
+                    var productImage = new ProductImage
+                    {
+                        GridFsId = fileId,
+                        AltText = fileName,
+                        Type = "Farmadati"
+                    };
 
                     var filter = Builders<FarmadatiCache>.Filter.And(
                         Builders<FarmadatiCache>.Filter.Eq(
@@ -586,43 +683,202 @@ namespace HeronIntegration.Engine.External.Farmadati.FullImportNew
                             filter,
                             update));
 
-                    if (updates.Count >= 100)
+                    if (updates.Count >= 500)
                     {
+                        await _cache.BulkWriteAsync(updates);
+
                         merged += updates.Count;
-                        await _cache.BulkWriteAsync(
-                            updates);
 
                         updates.Clear();
 
-                        _logger.LogInformation("Merge Te0009 prodotti: {Count}", merged);
+                        _logger.LogInformation(
+                            "TE009 - Elaborati: {Processed}, Downloadate: {Downloaded}, Merge: {Merged}",
+                            processed,
+                            downloaded,
+                            merged);
+                    }
 
+                    if (processed % 1000 == 0)
+                    {
+                        _logger.LogInformation(
+                            "TE009 progress: {Processed} record elaborati",
+                            processed);
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Log dell'errore, ma continua con il prossimo record
-                    //Console.WriteLine($"Errore durante l'elaborazione del record: {ex.Message}");
+                    errors++;
+
+                    _logger.LogError(
+                        ex,
+                        "Errore TE009. AIC={Aic}, File={FileName}",
+                        record.TryGetValue("FDI_0840", out var a) ? a : "N/A",
+                        record.TryGetValue("FDI_0843", out var f) ? f : "N/A");
                 }
             }
 
             if (updates.Count > 0)
             {
-                try 
-                {
-                    merged += updates.Count;
-                    cancellationToken.ThrowIfCancellationRequested();
-                    
-                    await _cache.BulkWriteAsync(
-                        updates);
+                await _cache.BulkWriteAsync(updates);
 
-                    _logger.LogInformation("Merge Te0009 prodotti: {Count}", merged);
-                }
-                catch (Exception ex)
-                {
-                    // Log dell'errore
-                    //Console.WriteLine($"Errore durante il BulkWriteAsync: {ex.Message}"); 
-                }
+                merged += updates.Count;
             }
+
+            _logger.LogInformation(
+                "TE009 completato. Processati={Processed}, Downloadati={Downloaded}, Saltati={Skipped}, Errori={Errors}, Merge={Merged}",
+                processed,
+                downloaded,
+                skipped,
+                errors,
+                merged);
+        }
+
+        //TUTTE LE IMMAGINI
+        private async Task MergeImagesAsync(
+            string xmlPath,
+            string datasetCode,
+            string aicField,
+            string fileField,
+            ConcurrentDictionary<string, ObjectId> existingFiles,
+            CancellationToken cancellationToken)
+        {
+            int processed = 0;
+            int downloaded = 0;
+            int merged = 0;
+            int errors = 0;
+            int skipped = 0;
+
+            var updates = new ConcurrentBag<WriteModel<FarmadatiCache>>();
+
+            await Parallel.ForEachAsync(
+                ReadRecords(xmlPath),
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = 10,
+                    CancellationToken = cancellationToken
+                },
+                async (record, ct) =>
+                {
+                    try
+                    {
+                        Interlocked.Increment(ref processed);
+
+                        if (!record.TryGetValue(aicField, out var aic))
+                        {
+                            Interlocked.Increment(ref skipped);
+                            return;
+                        }
+
+                        if (!record.TryGetValue(fileField, out var fileName))
+                        {
+                            Interlocked.Increment(ref skipped);
+                            return;
+                        }
+
+                        ObjectId fileId;
+
+                        if (!existingFiles.TryGetValue(
+                                fileName,
+                                out fileId))
+                        {
+                            var image =
+                                await _imageDownloader.DownloadAsync(
+                                    datasetCode,
+                                    fileName,
+                                    ct);
+
+                            if (image == null)
+                            {
+                                Interlocked.Increment(ref skipped);
+                                return;
+                            }
+
+                            fileId =
+                                await _imageStorage.SaveAsync(
+                                    fileName,
+                                    image.Value.Bytes,
+                                    image.Value.MimeType);
+
+                            existingFiles.TryAdd(
+                                fileName,
+                                fileId);
+
+                            Interlocked.Increment(ref downloaded);
+                        }
+
+                        var productImage = new ProductImage
+                        {
+                            GridFsId = fileId,
+                            AltText = fileName,
+                            Type = "Farmadati"
+                        };
+
+                        var filter =
+                            Builders<FarmadatiCache>.Filter.And(
+                                Builders<FarmadatiCache>.Filter.Eq(
+                                    x => x.Aic,
+                                    aic),
+                                Builders<FarmadatiCache>.Filter.Not(
+                                    Builders<FarmadatiCache>.Filter.ElemMatch(
+                                        x => x.Images,
+                                        i => i.GridFsId == fileId)));
+
+                        var update =
+                            Builders<FarmadatiCache>.Update
+                                .AddToSet(
+                                    x => x.Images,
+                                    productImage);
+
+                        updates.Add(
+                            new UpdateOneModel<FarmadatiCache>(
+                                filter,
+                                update));
+
+                        if (processed % 1000 == 0)
+                        {
+                            _logger.LogInformation(
+                                "{Dataset} Processati={Processed} Downloadati={Downloaded} Errori={Errors}",
+                                datasetCode,
+                                processed,
+                                downloaded,
+                                errors);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Increment(ref errors);
+
+                        _logger.LogError(
+                            ex,
+                            "{Dataset} errore",
+                            datasetCode);
+                    }
+                });
+
+            var batch = updates.ToList();
+
+            foreach (var chunk in batch.Chunk(500))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                await _cache.BulkWriteAsync(chunk);
+
+                merged += chunk.Length;
+
+                _logger.LogInformation(
+                    "{Dataset} Merge={Merged}",
+                    datasetCode,
+                    merged);
+            }
+
+            _logger.LogInformation(
+                "{Dataset} completato. Processati={Processed} Downloadati={Downloaded} Saltati={Skipped} Errori={Errors} Merge={Merged}",
+                datasetCode,
+                processed,
+                downloaded,
+                skipped,
+                errors,
+                merged);
         }
 
         private async Task MergeTe008Async(string xmlPath, CancellationToken cancellationToken)

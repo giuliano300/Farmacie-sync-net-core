@@ -5,14 +5,18 @@ public class FarmadatiImageDownloader
     private readonly HttpClient _httpClient;
     private readonly string _endpoint;
     private readonly string _password;
+    private readonly ILogger<FarmadatiImageDownloader> _logger;
 
     public FarmadatiImageDownloader(
         HttpClient httpClient,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<FarmadatiImageDownloader> logger)
     {
         _httpClient = httpClient;
+        _httpClient.Timeout = TimeSpan.FromSeconds(30);
         _endpoint = configuration["Farmadati:ImagesEndpoint"]!;
         _password = configuration["Farmadati:Password"]!;
+        _logger = logger;
     }
 
     public async Task<(string Base64, string MimeType)?> DownloadAsBase64Async(
@@ -54,7 +58,8 @@ public class FarmadatiImageDownloader
 
     public async Task<(byte[] Bytes, string MimeType)?> DownloadAsync(
     string datasetCode,
-    string fileName)
+    string fileName,
+    CancellationToken cancellationToken)
     {
         try
         {
@@ -64,7 +69,10 @@ public class FarmadatiImageDownloader
                 $"&tipodoc={datasetCode}" +
                 $"&nomefile={fileName}";
 
-            var response = await _httpClient.GetAsync(url);
+            var response = await _httpClient.GetAsync(
+                url, 
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
 
             if (!response.IsSuccessStatusCode)
                 return null;
@@ -80,8 +88,13 @@ public class FarmadatiImageDownloader
 
             return (bytes, mime);
         }
-        catch
+        catch(Exception ex)
         {
+            _logger.LogError(
+               ex,
+               "Errore download immagine {DatasetCode}/{FileName}",
+               datasetCode,
+               fileName);
             return null;
         }
     }
