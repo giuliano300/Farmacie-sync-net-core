@@ -232,50 +232,101 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task WaitReindexAsync(string batchId, CancellationToken token)
     {
+        decimal? lastPercent = null;
+        DateTime lastChange = DateTime.UtcNow;
+        DateTime? firstErrorTime = null;
+
+        const int timeoutMinutes = 5;
         while (true)
         {
-            var response =
-                await _http.GetStringAsync(
-                    $"{BaseUrl}/rest/V1/heron/reindex-status/{batchId}",
-                    token
-                );
-
-            Console.WriteLine(response);
-
-            var innerJson =
-                System.Text.Json.JsonSerializer.Deserialize<string>(response);
-
-            var result =
-                System.Text.Json.JsonSerializer.Deserialize<ReindexStatus>(
-                    innerJson,
-                    new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    }
-                );
-
-            if (result != null)
+            try
             {
-                Console.WriteLine(
-                    $"{result.Percent}%"
-                );
+                var response = await _http.GetStringAsync(
+                    $"{BaseUrl}/rest/V1/heron/reindex-status/{batchId}",
+                    token);
 
-                // AGGIORNO IL REINDEX
-                await _importToMagento.UpdateImportStatusAsync(batchId, reindexPercent: result.Percent);
+                // Se la chiamata va a buon fine azzero il timer degli errori
+                firstErrorTime = null;
 
-                if (!result.Running || result.Percent >= 95)
+                var innerJson =
+                    System.Text.Json.JsonSerializer.Deserialize<string>(response);
+
+                var result =
+                    System.Text.Json.JsonSerializer.Deserialize<ReindexStatus>(
+                        innerJson,
+                        new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+
+                if (result != null)
                 {
+                    //Console.WriteLine($"{result.Percent}%");
+
+                    // Verifica se la percentuale è cambiata
+                    if (lastPercent == null || Math.Abs(lastPercent.Value - result.Percent) > 0.01m)
+                    {
+                        lastPercent = result.Percent;
+                        lastChange = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        // Se è ferma da troppo tempo
+                        if (DateTime.UtcNow - lastChange > TimeSpan.FromMinutes(timeoutMinutes))
+                        {
+                            Console.WriteLine(
+                                $"Reindex fermo al {result.Percent}% da oltre {timeoutMinutes} minuti. Forzo al 100%.");
+
+                            await _importToMagento.UpdateImportStatusAsync(
+                                batchId,
+                                reindexPercent: 100);
+
+                            break;
+                        }
+                    }
+
+                    // Aggiornamento normale
+                    await _importToMagento.UpdateImportStatusAsync(
+                        batchId,
+                        reindexPercent: result.Percent);
+
+                    if (!result.Running || result.Percent >= 98)
+                    {
+                        await _importToMagento.UpdateImportStatusAsync(
+                            batchId,
+                            reindexPercent: 100);
+
+                        break;
+                    }
+                }
+
+                await Task.Delay(5000, token);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+
+                if (firstErrorTime == null)
+                {
+                    firstErrorTime = DateTime.UtcNow;
+                }
+
+                if (DateTime.UtcNow - firstErrorTime >
+                    TimeSpan.FromMinutes(timeoutMinutes))
+                {
+                    Console.WriteLine(
+                        $"Errore continuo da oltre {timeoutMinutes} minuti. Forzo il reindex al 100%.");
+
+                    await _importToMagento.UpdateImportStatusAsync(
+                        batchId,
+                        reindexPercent: 100);
+
                     break;
                 }
             }
-
-            await Task.Delay(
-                2000,
-                token
-            );
         }
-    }
 
+    }
     // =====================================================
     // 🔥 POLLING IMMAGINI SU CUSTOM API
     // =====================================================
@@ -420,6 +471,13 @@ public class MagentoExporter : IMagentoExporter
                 mapped
             )
         };
+
+            var pr = mapped.Where(a => a.macroGroup != null).ToList();
+           foreach(var o in pr)
+            {
+                if (o.macroGroup == "P")
+                    Console.WriteLine("ciao");
+            }
 
         var json =
             System.Text.Json.JsonSerializer.Serialize(request);
