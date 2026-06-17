@@ -332,77 +332,107 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task WaitPollingImagesAsync(string batchId, CancellationToken token)
     {
+        decimal? lastPercent = null;
+        DateTime lastChange = DateTime.UtcNow;
+        DateTime? firstErrorTime = null;
+
+        const int timeoutMinutes = 5;
         int processedCount = 0;
 
         while (true)
         {
-            var response =
+            try
+            {
+                var response =
                 await _http.GetStringAsync(
                     $"{BaseUrl}/rest/V1/heron/images-status/{batchId}",
                     token
                 );
 
-            Console.WriteLine(response);
+                // Se la chiamata va a buon fine azzero il timer degli errori
+                firstErrorTime = null;
 
-            var innerJson =
-                System.Text.Json.JsonSerializer.Deserialize<string>(response);
+                var innerJson =
+                    System.Text.Json.JsonSerializer.Deserialize<string>(response);
 
-            var result =
-                System.Text.Json.JsonSerializer.Deserialize<ImagesImportStatus>(
-                    innerJson,
-                    new JsonSerializerOptions
+                var result =
+                    System.Text.Json.JsonSerializer.Deserialize<ImagesImportStatus>(
+                        innerJson,
+                        new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        }
+                    );
+
+                var allSkus = result!.Inserted;
+
+                var newSkus = allSkus.Skip(processedCount).ToList();
+                processedCount = allSkus.Count;
+
+                if (newSkus.Count > 0)
+                {
+                    var l = new List<InventoryItem>();
+                    foreach (var s in newSkus)
                     {
-                        PropertyNameCaseInsensitive = true
+                        var i = new InventoryItem()
+                        {
+                            Id = batchId,
+                            Qty = 0,
+                            Message = "Inserimento riuscito",
+                            Sku = s
+                        };
+                        l.Add(i);
                     }
-                );
-            var allSkus = result!.Inserted;
+                    await _exportRepo.SetStatusBulkAsync(
+                        l,
+                        ExportStatus.InsertImages
+                    );
 
-            var newSkus = allSkus.Skip(processedCount).ToList();
-            processedCount = allSkus.Count;
-
-            if (newSkus.Count > 0)
-            {
-                var l = new List<InventoryItem>();
-                foreach (var s in newSkus)
-                {
-                    var i = new InventoryItem()
-                    {
-                        Id = batchId,
-                        Qty = 0,
-                        Message = "Inserimento riuscito",
-                        Sku = s
-                    };
-                    l.Add(i);
+                    //AGGIORNAMENTO IMPORT STATUS
+                    //AGGIORNA QUANTITA' IMPORTATA
+                    await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesInserted: l.Count);
                 }
-                await _exportRepo.SetStatusBulkAsync(
-                    l,
-                    ExportStatus.InsertImages
-                );
-
-                //AGGIORNAMENTO IMPORT STATUS
-                //AGGIORNA QUANTITA' IMPORTATA
-                await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesInserted: l.Count);
-            }
 
 
-            if (result != null)
-            {
-                Console.WriteLine(
-                    $"{result.Percent}%"
-                );
-
-                if (!result.Running)
+                if (result != null)
                 {
-                    //AGGIORNAMENTO IMPORT STATUS TERMINATO
+                    Console.WriteLine(
+                        $"{result.Percent}%"
+                    );
+
+                    if (!result.Running)
+                    {
+                        //AGGIORNAMENTO IMPORT STATUS TERMINATO
+                        await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
+                        break;
+                    }
+                }
+
+                await Task.Delay(
+                    2000,
+                    token
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+
+                if (firstErrorTime == null)
+                {
+                    firstErrorTime = DateTime.UtcNow;
+                }
+
+                if (DateTime.UtcNow - firstErrorTime >
+                    TimeSpan.FromMinutes(timeoutMinutes))
+                {
+                    Console.WriteLine(
+                        $"Errore continuo da oltre {timeoutMinutes} minuti. Forzo il reindex al 100%.");
+
                     await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
+
                     break;
                 }
             }
-
-            await Task.Delay(
-                2000,
-                token
-            );
         }
     }
 
