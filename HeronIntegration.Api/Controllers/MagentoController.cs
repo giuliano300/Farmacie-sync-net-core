@@ -297,7 +297,7 @@ public class MagentoController : ControllerBase
     //--------------------------------------------------
 
     [HttpGet("runMagentoCronAsync")]
-    public async Task<IActionResult> RunMagentoCronAsync(string batchId)
+    public IActionResult RunMagentoCronAsync(string batchId)
     {
         var token = _processManager.Start(ProcessType.Batch,batchId);
 
@@ -318,17 +318,17 @@ public class MagentoController : ControllerBase
     }
 
     //--------------------------------------------------
-    // FINALIZE
+    // Finalizes the Magento operation status after asynchronous import phases finish.
     //--------------------------------------------------
 
     [HttpGet("finalizeBatchAsync")]
-    public async Task<IActionResult> FinalizeBatchAsync(string batchId)
+    public IActionResult FinalizeBatchAsync(string batchId)
     {
         var token = _processManager.Start(ProcessType.Batch, batchId);
 
         _ = Task.Run(async () =>
         {
-            await RunMagentoCronAsync(batchId);
+            RunMagentoCronAsync(batchId);
             await _batchFinalizer.FinalizeBatchAsync(batchId);
         }, token);
 

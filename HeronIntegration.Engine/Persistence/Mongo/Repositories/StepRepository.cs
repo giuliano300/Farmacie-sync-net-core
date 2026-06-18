@@ -22,7 +22,7 @@ public class StepRepository : IStepRepository
             .ToListAsync();
     }
 
-    public async Task<StepExecution> GetByIdAsync(string id)
+    public async Task<StepExecution?> GetByIdAsync(string id)
     {
         return await _context.StepExecutions
             .Find(x => x.Id == ObjectId.Parse(id))

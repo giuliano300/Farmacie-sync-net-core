@@ -95,10 +95,11 @@ public class FarmadatiImageProvider_TE004 : IProductImageProvider
             return images;
 
         }
-        catch(Exception s)
+        catch
         {
-
+            // Image providers must fail closed so the composite provider can continue with the next source.
         }
-        return null;
+
+        return Array.Empty<ProductImage>();
     }
 }

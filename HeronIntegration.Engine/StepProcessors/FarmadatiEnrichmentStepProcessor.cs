@@ -10,6 +10,7 @@ namespace HeronIntegration.Engine.StepProcessors;
 
 public class FarmadatiEnrichmentStepProcessor : IStepProcessor
 {
+    // Must match the Farmadati step generated for each batch.
     public string Step => "Farmadati";
 
     private readonly IRawProductRepository _rawRepo;
@@ -38,12 +39,16 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
     }
 
-    public async Task<StepExecutionResult?> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
+    /// <summary>
+    /// Enriches raw products using cached Farmadati data or records a management-cache fallback.
+    /// </summary>
+    public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
     {
         var result = new StepExecutionResult();
         result.StartedAt = DateTime.Now;
         try
         {
+            // Keep export state aligned when the step is retried manually.
             await _cleanupService.updateExportExecution(batchId);
 
             var step = await _stepRepo.GetStepAsync(batchId, "Farmadati");
@@ -57,6 +62,7 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
 
             var raws = await _rawRepo.GetByBatchAsync(batchId);
 
+            // Existing set prevents duplicate enriched rows when the same step is retried.
             var existing = await _enrichedRepo.GetAicsByBatchAsync(batchId);
             var existingSet = existing.ToHashSet();
 
@@ -70,6 +76,7 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
 
             foreach (var raw in raws)
             {
+                // Products already enriched for this batch are left untouched.
                 if (existingSet.Contains(raw.Aic))
                     continue;
 
@@ -77,14 +84,17 @@ public class FarmadatiEnrichmentStepProcessor : IStepProcessor
 
                 if (cacheDict.TryGetValue(raw.Aic, out var cache))
                 {
+                    // Best path: use Farmadati cache with descriptions, macro groups and images.
                     enriched = EnrichedProduct.FromCache(raw, cache, batchId);
                 }
                 else if(cacheManagementDict.TryGetValue(raw.Aic, out var cacheManagement))
                 {
+                    // Known missing item: create the minimal product without re-queuing it for lookup.
                     enriched = EnrichedProduct.CreateMinimal(raw, batchId);
                 }
                 else
                 {
+                    // First miss: remember it so operators can review or enrich it later.
                     var managementCache = new ManagementCache
                     {
                         Aic = raw.Aic,

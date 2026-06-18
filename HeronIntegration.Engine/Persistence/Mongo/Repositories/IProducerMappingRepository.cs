@@ -7,7 +7,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 public interface IProducerMappingRepository
 {
     Task<ProducerMapping?> FindAsync(string customerId, string sourceProducer);
-    Task<List<ProducerMapping>?> GetByCustomerAsync(string customerId);
+    Task<List<ProducerMapping>> GetByCustomerAsync(string customerId);
 
     Task<ProducerMapping?> GetByIdAsync(string id);
 

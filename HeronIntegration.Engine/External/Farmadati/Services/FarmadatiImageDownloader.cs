@@ -51,6 +51,11 @@ public class FarmadatiImageDownloader
         }
         catch (Exception ex)
         {
+            _logger.LogError(
+                ex,
+                "Errore download immagine base64 {DatasetCode}/{FileName}",
+                datasetCode,
+                fileName);
         }
         return null;
 

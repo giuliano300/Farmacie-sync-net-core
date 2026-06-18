@@ -12,6 +12,7 @@ namespace HeronIntegration.Engine.StepProcessors;
 
 public class HeronImportStepProcessor : IStepProcessor
 {
+    // Must match the StepExecution.Step value created by HeronFileWatcherWorker.
     public string Step => "HeronImport";
 
     private readonly IBatchRepository _batchRepo;
@@ -52,6 +53,9 @@ public class HeronImportStepProcessor : IStepProcessor
         _logger = logger;
     }
 
+    /// <summary>
+    /// Imports the Heron XML for a batch, maps categories/producers and creates raw/export rows.
+    /// </summary>
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
     {
         var result = new StepExecutionResult
@@ -61,6 +65,7 @@ public class HeronImportStepProcessor : IStepProcessor
 
         try
         {
+            // Reset export rows from previous attempts before rebuilding this step output.
             await _cleanupService.updateExportExecution(batchId);
 
             var step = await _stepRepo.GetStepAsync(batchId, "HeronImport");
@@ -72,7 +77,7 @@ public class HeronImportStepProcessor : IStepProcessor
 
             await _stepRepo.SetRunningAsync(step.Id.ToString());
 
-
+            // Batch and customer are required because the Heron FTP and pricing rules are customer-specific.
             var batch = await _batchRepo.GetByIdAsync(batchId);
             if (batch == null)
                 throw new Exception($"Batch {batchId} non trovato");
@@ -81,12 +86,12 @@ public class HeronImportStepProcessor : IStepProcessor
             if (customer == null)
                 throw new Exception($"Customer {batch.CustomerId} non trovato");
 
-            //SCARICA L'ULTIMO FILE DA HERON
+            // Download the newest Heron ZIP for this customer before parsing the XML path stored on the batch.
             var ftp = new FtpClient(customer.HeronFtp, customer.HeronUsername, customer.HeronPassword);
 
             ftp.Connect();
 
-            // 👉 prendi il più recente
+            // Select the newest ZIP file exposed by Heron FTP.
             var files = ftp.GetListing(customer.HeronFtpFolder);
 
             var latestZip = files
@@ -101,7 +106,7 @@ public class HeronImportStepProcessor : IStepProcessor
                 var destinationPath = Path.GetDirectoryName(batch.HeronFilePath!);
                 var fileName = Path.GetFileName(batch.HeronFilePath!);
 
-                // assicura che la cartella esista
+                // Recreate the destination folder so the parser reads only the current Heron export.
                 if (Directory.Exists(destinationPath))
                 {
                     Directory.Delete(destinationPath, true);
@@ -116,20 +121,19 @@ public class HeronImportStepProcessor : IStepProcessor
 
                 using var archive = new ZipArchive(ms, ZipArchiveMode.Read);
 
-                // prende il file XML dentro lo zip
+                // Heron exports one XML inside the downloaded ZIP.
                 var entry = archive.Entries
                     .First(e => !string.IsNullOrEmpty(e.Name) && e.Name.EndsWith(".xml"));
 
                 var destinationFile = Path.Combine(destinationPath!, fileName);
 
-                // scrittura file
+                // Write the XML to the batch path consumed by IHeronXmlParser.
                 using var entryStream = entry.Open();
                 using var fileStream = new FileStream(destinationFile, FileMode.Create, FileAccess.Write);
 
                 entryStream.CopyTo(fileStream);
             }
-            //////////////////////////
-
+            // Parse and normalize Heron rows into database entities.
             var parsed = _parser.Parse(batch.HeronFilePath!, batch.CustomerId).ToList();
 
             var rawProducts = new List<RawProduct>();
@@ -138,11 +142,12 @@ public class HeronImportStepProcessor : IStepProcessor
             var categoryMap = await _categoryResolver.LoadMappingsAsync(batch.CustomerId);
             var producerMap = await _producerResolver.LoadMappingsAsync(batch.CustomerId);
 
+            // Customer exclusion list wins before any enrichment or Magento export work.
             var productToExclude = (await _productToExcludeRepository.GetByCustomerAsync(batch.CustomerId)).Select(a => a.Aic);
 
             foreach (var p in parsed)
             {
-                //NON AGGIUNGE PRODOTTI NON VENDIBILI
+                // Skip products explicitly marked as not sellable for this customer.
                 if (productToExclude.Contains(p.Aic))
                     continue;
 
@@ -152,6 +157,7 @@ public class HeronImportStepProcessor : IStepProcessor
 
                 if (categoryMap.TryGetValue(key, out var mapped))
                 {
+                    // Category mappings translate Heron category/subcategory into Magento category ids.
                     magentoCategoryId = mapped;
                 }
 
@@ -161,6 +167,7 @@ public class HeronImportStepProcessor : IStepProcessor
                         ? mappedProducer
                         : p.Producer;
 
+                // Heron prices may arrive VAT-inclusive depending on customer configuration.
                 var price = GetPrice(p.Price, customer.IvaInclusive, p.Vat);
                 var originalPrice = GetPrice(p.OriginalPrice, customer.IvaInclusive, p.Vat);
 
@@ -216,6 +223,7 @@ public class HeronImportStepProcessor : IStepProcessor
 
     public decimal GetPrice(decimal price, bool ivaInclusive, decimal ivaPercent)
     {
+        // Current naming is historical: false means the incoming price must be normalized without VAT.
         if (!ivaInclusive)
         {
             // Nessuna IVA da scorporare

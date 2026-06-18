@@ -8,29 +8,30 @@ using System.IO;
 
 public class SupplierStockProcessor : ISupplierStockProcessor
 {
-    private readonly IEnumerable<ISupplierFtpClient> _ftpClients;
     private readonly IEnumerable<ISupplierParser> _parsers;
     private readonly ISupplierStockRepository _repo; 
     private readonly ISupplierRepository _supplierRepo;
     private readonly IHostEnvironment _env;
-
-    private readonly Dictionary<string, string> _files = new();
+    private readonly ILogger<SupplierStockProcessor> _logger;
 
     public SupplierStockProcessor(
-        IEnumerable<ISupplierFtpClient> ftpClients,
         IEnumerable<ISupplierParser> parsers,
         ISupplierStockRepository repo,
         ISupplierRepository supplierRepo,
-        IHostEnvironment env)
+        IHostEnvironment env,
+        ILogger<SupplierStockProcessor> logger)
     {
-        _ftpClients = ftpClients;
         _parsers = parsers;
         _repo = repo;
         _supplierRepo = supplierRepo;
         _env = env;
+        _logger = logger;
     }
 
-    public async Task<string> DownloadAsync(string supplierCode)
+    /// <summary>
+    /// Downloads the newest FTP file for one active supplier and stores it under SupplierFiles.
+    /// </summary>
+    public async Task<string?> DownloadAsync(string supplierCode)
     {
         try
         {
@@ -48,21 +49,21 @@ public class SupplierStockProcessor : ISupplierStockProcessor
                 supplierCode.ToUpper()
             );
 
-            FtpListItem latestFile = null;
+            FtpListItem? latestFile = null;
 
             try
             {
-                var ftp = new FtpClient(supplier.FtpHost, supplier.FtpUser, supplier.FtpPassword);
+                using var ftp = new FtpClient(supplier.FtpHost, supplier.FtpUser, supplier.FtpPassword);
 
                 ftp.Connect();
 
                 var files = ftp.GetListing();
 
-                // 👉 prendi il più recente
+                // Select the newest supplier file available on FTP.
                 latestFile = files
                     .Where(x => x.Type == FtpObjectType.File)
                     .OrderByDescending(x => x.Modified)
-                    .FirstOrDefault()!;
+                    .FirstOrDefault();
 
                 if (latestFile == null)
                     return null;
@@ -80,8 +81,13 @@ public class SupplierStockProcessor : ISupplierStockProcessor
 
                 return latestFile.FullName;
             }
-            catch(Exception e)
+            catch (Exception ex)
             {
+                _logger.LogWarning(
+                    ex,
+                    "Download FTP fallito per supplier {SupplierCode}; uso ultimo file locale se presente",
+                    supplierCode);
+
                 if (Directory.Exists(folder))
                 {
                     var file = new DirectoryInfo(folder)
@@ -91,24 +97,30 @@ public class SupplierStockProcessor : ISupplierStockProcessor
                     if (file == null)
                         return null;
 
-                    return file!.FullName;
+                    return file.FullName;
                 }
             };
         }
-        catch(Exception e)
+        catch (Exception ex)
         {
-
+            _logger.LogError(ex, "Errore download supplier {SupplierCode}", supplierCode);
         }
         return null;
 
     }
 
+    /// <summary>
+    /// Parses the latest local supplier file and replaces that supplier stock snapshot.
+    /// </summary>
     public async Task<bool> ImportAsync(string supplierCode)
     {
         try
         {
-            var parser = _parsers.First(x =>
+            var parser = _parsers.FirstOrDefault(x =>
             x.SupplierCode.Equals(supplierCode, StringComparison.OrdinalIgnoreCase));
+
+            if (parser == null)
+                throw new Exception($"Parser non trovato per supplier {supplierCode}");
 
             var root = _env.ContentRootPath;
             var parent = Directory.GetParent(root)!.FullName;
@@ -136,19 +148,25 @@ public class SupplierStockProcessor : ISupplierStockProcessor
 
             return true;
         }
-        catch(Exception e)
+        catch (Exception ex)
         {
-
+            _logger.LogError(ex, "Errore import supplier {SupplierCode}", supplierCode);
         }
         return false;
     }
 
+    /// <summary>
+    /// Runs download and import for one supplier.
+    /// </summary>
     public async Task RunAsync(string supplierCode)
     {
         await DownloadAsync(supplierCode);
         await ImportAsync(supplierCode);
     }
 
+    /// <summary>
+    /// Downloads files for all active suppliers.
+    /// </summary>
     public async Task DownloadAllAsync()
     {
         var suppliers = await _supplierRepo.GetActiveAsync();
@@ -157,6 +175,9 @@ public class SupplierStockProcessor : ISupplierStockProcessor
             await DownloadAsync(s.Code);
     }
 
+    /// <summary>
+    /// Imports latest local files for all active suppliers.
+    /// </summary>
     public async Task ImportAllAsync()
     {
         var suppliers = await _supplierRepo.GetActiveAsync();
@@ -165,6 +186,9 @@ public class SupplierStockProcessor : ISupplierStockProcessor
             await ImportAsync(s.Code);
     }
 
+    /// <summary>
+    /// Runs download and import for all active suppliers.
+    /// </summary>
     public async Task RunAllAsync()
     {
         var suppliers = await _supplierRepo.GetActiveAsync();

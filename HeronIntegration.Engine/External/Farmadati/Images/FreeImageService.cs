@@ -106,9 +106,9 @@ public class FreeImageService : IProductImageProvider
             }
 
         }
-        catch (Exception ex) 
-        { 
-        
+        catch
+        {
+            // Free image lookup is best effort; official Farmadati providers remain the primary source.
         }
         return Array.Empty<ProductImage>();
     }

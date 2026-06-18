@@ -10,7 +10,7 @@ public interface ICategoryMappingRepository
         string customerId,
         string sourceCategory,
         string sourceSubCategory);
-    Task<List<CategoryMapping>?> GetByCustomerAsync(
+    Task<List<CategoryMapping>> GetByCustomerAsync(
         string customerId);
 
     Task<CategoryMapping?> GetByIdAsync(string id);

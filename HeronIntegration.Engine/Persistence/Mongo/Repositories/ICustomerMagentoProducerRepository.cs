@@ -5,7 +5,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public interface ICustomerMagentoProducerRepository
 {
-    Task<List<CustomerMagentoProducer>?> GetByCustomerAsync(
+    Task<List<CustomerMagentoProducer>> GetByCustomerAsync(
         string customerId);
 
     Task<CustomerMagentoProducer?> GetByIdAsync(string id);

@@ -92,22 +92,18 @@ public class BatchReportController : ControllerBase
     {
         try
         {
-            var token = _processManager.Start(ProcessType.Batch, id);
+            _processManager.Start(ProcessType.Batch, id);
             var batch = await _batchRepo.GetByIdAsync(id);
             var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
 
             if (customer?.Magento == null)
                 throw new Exception("Magento config mancante");
 
-            //var exporter = _magentoExporterFactory.Create(customer.Magento);
             await _batchManagerService.DeleteAsync(id);
-            //await exporter.DeleteProducts();
-            //await exporter.CleanIndex(token);
-            //await exporter.CleanCache(token);
 
             return true;
         }
-        catch (Exception e)
+        catch
         {
             return false;
         }

@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 
 public class MagentoExportStepProcessor : IStepProcessor
 {
+    // Must match the Magento step generated for each batch.
     public string Step => "Magento";
 
     private readonly IResolvedProductRepository _resolvedRepo;
@@ -43,16 +44,20 @@ public class MagentoExportStepProcessor : IStepProcessor
         _importToMagento = importToMagento;
     }
 
+    /// <summary>
+    /// Exports resolved products to Magento according to the requested run type.
+    /// </summary>
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = 0)
     {
         var result = new StepExecutionResult { StartedAt = DateTime.UtcNow };
 
         try
         {
+            // Default manual/API execution runs the full Magento workflow.
             if (type == null)
                 type = TypeRun.Completo;
 
-
+            // Clear stale status before calculating what Magento must receive.
             await _cleanupService.updateExportExecution(batchId);
 
             var step = await _stepRepo.GetStepAsync(batchId, "Magento")
@@ -70,30 +75,30 @@ public class MagentoExportStepProcessor : IStepProcessor
             var exporter = _magentoExporterFactory.Create(customer.Magento);
             var resolvedList = await _resolvedRepo.GetByBatchAsync(batchId);
 
-            // 🔹 mapping unico
+            // Normalize products once before comparing them with Magento metadata.
             var mapped = MapProducts(resolvedList);
 
             var sku = mapped.Select(a => a.Aic).ToList();
 
-            // 🔹 download prodotti
+            // Download Magento metadata once; the following phases reuse the same snapshot.
             var metadata = await exporter.GetMagentoMetadataAsync(batchId, token);
             var magentoSet = metadata.magentoProducts!
                 .Select(x => x.Sku)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // 🔹 CREA IMPORT STAUTS
+            // Create/update the progress document used by dashboard polling.
                await _importToMagento.Start(batchId, mapped.Count, type!);
 
             var skus = new List<string>();
-            // 🔹 UPSERT
+            // Product import creates missing products and updates changed product data.
             if (type is TypeRun.Completo or TypeRun.ImportProdotti)
                 skus = await HandleProductUpsert(metadata, mapped, exporter, batchId, token, type);
 
-            // 🔹 STOCK
+            // Price/quantity update can run independently from full product import.
             if (type is TypeRun.UpdatePrezzi)
                 skus = (await HandleStockUpdate(metadata, mapped, exporter, batchId, token)!).Select(a => a.Sku).ToList();
 
-            // 🔹 IMMAGINI
+            // Image import stages files on FTP and waits for the Magento custom API to finish.
             if (type is TypeRun.Completo or TypeRun.ImportImmagini)
             {
                 var productWithImages = mapped.Where(a => a.Images.Count > 0).ToList();
@@ -108,7 +113,7 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             if (skus.Count > 0)
             {
-                //AGGIORNA IL REINDEX A RUNNING
+                // Reindex only SKUs touched by this run and then clean Magento caches.
                 await _importToMagento.UpdateImportStatusAsync(batchId, 
                     insertProductsStatus: OperationsStatus.Ended,
                     updateProductsStatus: OperationsStatus.Ended,
@@ -121,11 +126,10 @@ public class MagentoExportStepProcessor : IStepProcessor
                 await exporter.CleanCache(token);
             }
 
-            // FINALIZE
+            // Finalization writes the report and removes transient batch data.
             await _batchFinalizer.FinalizeBatchAsync(batchId);
-            //await exporter.StopMagentoImportAsync(batchId);
 
-            //TERMINA TUTTO
+            // Mark dashboard progress as fully completed after finalization.
             await _importToMagento.UpdateImportStatusAsync(batchId,
                     insertProductsStatus: OperationsStatus.Ended,
                     updateProductsStatus: OperationsStatus.Ended,
@@ -148,6 +152,7 @@ public class MagentoExportStepProcessor : IStepProcessor
 
     private List<ResolvedProduct> MapProducts(List<ResolvedProduct> source)
     {
+        // Create detached product instances so downstream phases can safely normalize values.
         return source.Select(p => new ResolvedProduct
         {
             BatchId = p.BatchId,
@@ -177,12 +182,13 @@ public class MagentoExportStepProcessor : IStepProcessor
         CancellationToken token,
         TypeRun? type)
     {
-
+        // Magento lookups are dictionary-based because this method compares every resolved product.
         var magentoDict = metadata.magentoProducts!
             .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
 
         var mappedList = mapped.Select(p =>
         {
+            // Magento expects option ids for manufacturer/supplier attributes, not display names.
             return new ResolvedProduct
             {
                 BatchId = p.BatchId,
@@ -215,6 +221,7 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         foreach (var p in mappedList)
         {
+            // Missing SKU is a straight insert.
             if (!magentoDict.TryGetValue(p.Aic, out var m))
             {
                 toUpsert.Add(p);
@@ -223,6 +230,7 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             if (NeedsUpdate(p, m, exporter, metadata))
             {
+                // Products without a mapped category go to the configured "smistare" fallback.
                 if (p.MagentoCategoryId == null)
                 {
                     var x = metadata!.categories!.FirstOrDefault(a => a.Key.ToLower().EndsWith("smistare"));
@@ -242,6 +250,7 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         if (type == TypeRun.Completo)
         {
+            // Full imports disable Magento products no longer present in the current Heron feed.
             var mongoSet = mapped.Select(x => x.Aic)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -255,7 +264,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         }
 
         if (toUpsert.Count == 0)
-            return null;
+            return new List<string>();
         else
             return toUpsert.Select(a => a.Aic).ToList();
     }
@@ -266,6 +275,7 @@ public class MagentoExportStepProcessor : IStepProcessor
     IMagentoExporter exporter,
     MagentoMetadata metadata)
     {
+        // Keep this comparison narrow: only changes that affect Magento product content trigger an upsert.
         if (magento.Price != mongo.Price)
             return true;
 
@@ -278,13 +288,7 @@ public class MagentoExportStepProcessor : IStepProcessor
         if (!DescriptionEquals(magento, mongo))
             return true;
 
-        //var mongoCat = exporter
-        //    .ResolveCategoryId(metadata.categories!, mongo.SubCategory, default)
-        //    ?.ToString();
-
-        //if (!string.IsNullOrWhiteSpace(mongoCat) &&
-        //    !(magento.Categories ?? new List<string>()).Contains(mongoCat))
-        //    return true;
+        // Category comparison is intentionally disabled until category sync is made deterministic.
 
         return false;
     }
@@ -296,6 +300,7 @@ public class MagentoExportStepProcessor : IStepProcessor
 
     private static bool DescriptionEquals(MagentoSlimProduct m, ResolvedProduct p)
     {
+        // Magento may contain either short or long description depending on previous import history.
         var desc = m.Description?.Trim() ?? "";
 
         return desc == (p.ShortDescription ?? "").Trim() ||
@@ -309,6 +314,7 @@ public class MagentoExportStepProcessor : IStepProcessor
     string batchId,
     CancellationToken token)
     {
+        // Stock update compares current Magento values with resolved availability before sending bulk changes.
         var magentoProducts = magentoMetadata.magentoProducts;
         var magentoDict = magentoProducts!.ToDictionary(x => x.Sku, x => x);
 
@@ -321,12 +327,9 @@ public class MagentoExportStepProcessor : IStepProcessor
             new ConcurrentBag<ResolvedProduct>();
 
 
-        //AGGIORNAMENTO IMPORT STATUS
-        //AGGIORNA QUANTITA' DA IMPORTARE E SETTA A RUNNING LO STATO DELL' OPERAZIONE
+        // Start dashboard progress for the stock update phase.
         await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsToUpdate: mapped.Count, updateProductsStatus: OperationsStatus.Running);
 
-
-        //AGGIORNA 
 
         await Parallel.ForEachAsync(
             mapped,
@@ -341,12 +344,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                     ref processed
                 );
 
-                /*
-                |--------------------------------------------------------------------------
-                | PRODUCT
-                |--------------------------------------------------------------------------
-                */
-
+                // Skip SKUs that are not present in Magento.
                 if (!magentoDict.TryGetValue(
                         i.Aic,
                         out var product))
@@ -354,12 +352,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                     return;
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | SAME QTY
-                |--------------------------------------------------------------------------
-                */
-
+                // Products already aligned are only marked in export status.
                 if (product.Qty == i.Availability)
                 {
                     statusItems.Add(
@@ -373,30 +366,14 @@ public class MagentoExportStepProcessor : IStepProcessor
                     return;
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | TO UPDATE
-                |--------------------------------------------------------------------------
-                */
-
+                // Products with different availability are sent to Magento bulk stock update.
                 toUpdate.Add(i);
 
-                /*
-                |--------------------------------------------------------------------------
-                | BULK EVERY 200
-                |--------------------------------------------------------------------------
-                */
-
+                // Flush export status in chunks to avoid very large Mongo updates.
                 if (
                     statusItems.Count >= 200
                 )
                 {
-                    /*
-                    |--------------------------------------------------------------------------
-                    | LOCK
-                    |--------------------------------------------------------------------------
-                    */
-
                     List<InventoryItem> chunk;
 
                     lock (statusItems)
@@ -421,19 +398,13 @@ public class MagentoExportStepProcessor : IStepProcessor
                         }
                     }
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | BULK UPDATE
-                    |--------------------------------------------------------------------------
-                    */
-
                     await _exportRepo
                         .SetStatusBulkAsync(
                             chunk,
                             ExportStatus.UpdatePrice
                         );
 
-                    //AGGIORNA LE GIACENZE AGGIORNATE
+                    // Update dashboard progress with the flushed chunk size.
                     await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsUpdated: chunk.Count);
 
                 }

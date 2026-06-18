@@ -8,9 +8,9 @@ public class MongoContext
 {
     private readonly IMongoDatabase _database;
 
-    public MongoContext(IMongoClient client, IConfiguration config)
+    public MongoContext(IMongoDatabase database)
     {
-        _database = client.GetDatabase(config["Mongo:Database"]);
+        _database = database;
     }
 
     public IMongoCollection<BatchExecution> BatchExecutions =>

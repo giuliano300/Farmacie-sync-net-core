@@ -1,16 +1,30 @@
-﻿using FluentFTP; 
+using FluentFTP;
 
 namespace HeronIntegration.Engine.Suppliers
 {
+    /// <summary>
+    /// Base FTP client for supplier feeds. Credentials and paths are read from configuration
+    /// so operational secrets do not live in source code.
+    /// </summary>
     public abstract class BaseSupplierFtpClient : ISupplierFtpClient
     {
+        private readonly IConfiguration _configuration;
+
+        protected BaseSupplierFtpClient(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
         public abstract string SupplierCode { get; }
 
-        protected abstract string Host { get; }
-        protected abstract string Username { get; }
-        protected abstract string Password { get; }
-        protected abstract string RemoteFolder { get; }
+        protected string Host => GetRequiredValue("Host");
+        protected string Username => GetRequiredValue("Username");
+        protected string Password => GetRequiredValue("Password");
+        protected string RemoteFolder => GetRequiredValue("RemoteFolder");
 
+        /// <summary>
+        /// Downloads the first file available in the configured supplier remote folder.
+        /// </summary>
         public async Task<string> DownloadAsync(string destinationFolder)
         {
             Directory.CreateDirectory(destinationFolder);
@@ -31,6 +45,19 @@ namespace HeronIntegration.Engine.Suppliers
             await client.Disconnect();
 
             return localPath;
+        }
+
+        private string GetRequiredValue(string key)
+        {
+            var value = _configuration[$"SupplierFtp:{SupplierCode}:{key}"];
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException(
+                    $"Configuration value 'SupplierFtp:{SupplierCode}:{key}' is required.");
+            }
+
+            return value;
         }
     }
 }

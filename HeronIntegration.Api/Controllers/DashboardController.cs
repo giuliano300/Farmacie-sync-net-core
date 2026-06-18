@@ -54,7 +54,7 @@ public class DashboardController : ControllerBase
             return result;
 
         }
-        catch(Exception e)
+        catch
         {
             return new DashboardResponse();
         }
@@ -89,6 +89,9 @@ public class DashboardController : ControllerBase
 
             var innerJson =
                 JsonSerializer.Deserialize<string>(response);
+
+            if (string.IsNullOrWhiteSpace(innerJson))
+                return new ReindexStatus();
 
             var result =
                 JsonSerializer.Deserialize<ReindexStatus>(

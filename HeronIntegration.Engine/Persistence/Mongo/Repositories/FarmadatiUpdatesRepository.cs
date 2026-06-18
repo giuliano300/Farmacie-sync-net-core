@@ -90,6 +90,9 @@ public class FarmadatiUpdatesRepository : IFarmadatiUpdatesRepository
     }
     private async Task ProcessFarmadatiCache(FarmadatiUpdates updates, CancellationToken token)
     {
+        if (string.IsNullOrWhiteSpace(updates.CustomerId))
+            return;
+
         var customer = await _customerRepository.GetByIdAsync(updates.CustomerId);
         if (customer == null) return;
 

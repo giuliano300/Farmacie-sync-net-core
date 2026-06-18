@@ -9,7 +9,7 @@ public interface IProductToExcludeRepository
     Task InsertManyAsync(IEnumerable<ProductToExclude> products);
 
     Task<List<ProductToExclude>> GetByCustomerAsync(string customerId);
-    Task<ProductToExclude> GetByIdAsync(string Id);
+    Task<ProductToExclude?> GetByIdAsync(string Id);
 
     Task DeleteByCustomerAsync(string customerId);
 

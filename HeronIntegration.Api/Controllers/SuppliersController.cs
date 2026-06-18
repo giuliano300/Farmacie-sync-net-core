@@ -51,7 +51,7 @@ public class SuppliersController : ControllerBase
             return false;
 
         }
-        catch (Exception e)
+        catch
         {
 
         }
@@ -75,7 +75,7 @@ public class SuppliersController : ControllerBase
             await _repo.UpdateAsync(supplier);
             return true;
         }
-        catch (Exception e)
+        catch
         {
             return false;
         }
@@ -89,7 +89,7 @@ public class SuppliersController : ControllerBase
             await _repo.DeleteAsync(id);
             return true;
         }
-        catch (Exception e)
+        catch
         {
             return false;
         }

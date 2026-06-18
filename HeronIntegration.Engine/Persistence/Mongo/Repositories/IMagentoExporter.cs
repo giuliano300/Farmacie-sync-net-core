@@ -5,18 +5,18 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public interface IMagentoExporter
 {
-    // 🔹 Import singolo prodotto
+    // Imports or updates one product.
     Task<MagentoInsertResult> ExportAsync(ResolvedProduct product, CancellationToken token);
 
-    // 🔹 Upload immagini
+    // Uploads product images.
     Task<MagentoInsertResult> UploadImagesAsync(ResolvedProduct product, CancellationToken token);
 
-    // 🔹 Import massivo ottimizzato (NUOVO - non rompe nulla)
+    // Imports products in bulk.
     Task ImportProductsAsync(IEnumerable<ResolvedProduct> products, CancellationToken token);
 
     Task ReindexAllAsync(List<ResolvedProduct> products, string batchId, CancellationToken token);
 
-    // 🔹 Attributi e categorie
+    // Reads Magento attribute option ids.
     Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode, CancellationToken token);
 
     Task<Dictionary<string, int>> GetCategoryMapAsync(CancellationToken token);

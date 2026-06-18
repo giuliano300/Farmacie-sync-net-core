@@ -19,10 +19,13 @@ public class AdministratorController : ControllerBase
     }
 
     [HttpPost("login")]
-    public async Task<Administrator> Login(Login req)
+    public async Task<ActionResult<Administrator>> Login(Login req)
     {
         var c = await _adminRepo.Login(req);
 
-        return c;
+        if (c == null)
+            return Unauthorized();
+
+        return Ok(c);
     }
 }

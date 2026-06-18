@@ -28,7 +28,7 @@ public class FarmadatiCacheRepository : IFarmadatiCacheRepository
         {
             await _context.FarmadatiCaches.InsertOneAsync(cache);
         }
-        catch (Exception e)
+        catch
         {
 
         }
@@ -40,7 +40,7 @@ public class FarmadatiCacheRepository : IFarmadatiCacheRepository
         {
             await _context.FarmadatiCaches.InsertManyAsync(cache);
         }
-        catch(Exception e)
+        catch
         {
 
         }

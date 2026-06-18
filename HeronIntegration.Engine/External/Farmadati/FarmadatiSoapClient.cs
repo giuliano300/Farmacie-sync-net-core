@@ -51,9 +51,10 @@ public class FarmadatiSoapClient
                 pageSize
             );
         }
-        catch(Exception e) 
+        catch
         {
-            return null;
+            // Providers treat a null response as "dataset unavailable" and fall back gracefully.
+            return null!;
         }
         finally
         {

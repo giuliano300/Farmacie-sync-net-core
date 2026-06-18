@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.External.Farmadati.Services;
 using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
+using MongoDB.Driver;
 
 namespace HeronIntegration.Engine.Persistence.Mongo
 {
@@ -19,6 +20,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo
         private readonly IHostEnvironment _env;
         private readonly ICustomerMagentoCategoriesRepository _customerMagentoCategoriesRepository;
         private readonly IImportToMagentoStatusRepository _importToMagentoStatusRepository;
+        private readonly IMongoDatabase _database;
 
         public MagentoExporterFactory(
             IHttpClientFactory httpFactory,
@@ -28,7 +30,8 @@ namespace HeronIntegration.Engine.Persistence.Mongo
             ICustomerRepository customerRepo,
             IHostEnvironment env,
             ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository,
-            IImportToMagentoStatusRepository importToMagentoStatusRepository)
+            IImportToMagentoStatusRepository importToMagentoStatusRepository,
+            IMongoDatabase database)
         {
             _httpFactory = httpFactory;
             _imageStorage = imageStorage;
@@ -38,6 +41,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo
             _env = env;
             _customerMagentoCategoriesRepository = customerMagentoCategoriesRepository;
             _importToMagentoStatusRepository = importToMagentoStatusRepository;
+            _database = database;
         }
 
         public IMagentoExporter Create(MagentoConfig config)
@@ -53,7 +57,8 @@ namespace HeronIntegration.Engine.Persistence.Mongo
                 _customerRepo,
                 _env,
                 _customerMagentoCategoriesRepository,
-                _importToMagentoStatusRepository
+                _importToMagentoStatusRepository,
+                _database
             );
         }
     }

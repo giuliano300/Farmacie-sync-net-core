@@ -41,9 +41,12 @@ public class FarmadatiProductBaseInfoProvider_TE001 : IProductBaseInfoProvider
         }
         catch
         {
-            // dopo tutti i retry falliti
+            // All retries failed: report a provider error to the composite provider.
             return new ProductBaseInfo { error = true };
         }
+
+        if (result == null)
+            return new ProductBaseInfo { error = true };
 
         if (result.NumRecords == 0 || string.IsNullOrWhiteSpace(result.OutputValue))
             return null;

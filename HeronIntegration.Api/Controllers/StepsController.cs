@@ -100,7 +100,7 @@ public class StepsController : ControllerBase
 
     // RETRY pipeline
     [HttpPost("retry")]
-    public async Task<IActionResult> RetryStep(RetryStepRequest req)
+    public IActionResult RetryStep(RetryStepRequest req)
     {
         StopRunningBatch(req.BatchId);
 
@@ -118,7 +118,7 @@ public class StepsController : ControllerBase
     }
 
     [HttpPost("retryByType")]
-    public async Task<IActionResult> RetryByType(RetryStepRequest req)
+    public IActionResult RetryByType(RetryStepRequest req)
     {
         StopRunningBatch(req.BatchId);
 
@@ -259,7 +259,7 @@ public class StepsController : ControllerBase
             return;
         }
 
-        //FARMADATI
+        // Farmadati enrichment always runs after Heron import.
         stepName = OrderedSteps[1];
 
         step = await _stepRepo.GetStepAsync(batchId, stepName);
@@ -285,7 +285,7 @@ public class StepsController : ControllerBase
             return;
         }
 
-        //CONFRONTO SUPPLIER
+        // Supplier comparison can be skipped for image-only runs.
         stepName = OrderedSteps[2];
         step = await _stepRepo.GetStepAsync(batchId, stepName);
         if (step == null)
@@ -315,7 +315,7 @@ public class StepsController : ControllerBase
         }
         else
         {
-            //FA UNA COPIA SENZA CONTROLLARE
+            // Image-only runs still need resolved rows, so copy Heron availability as-is.
             var batchObjectId = ObjectId.Parse(batchId);
 
             var raws = await _enrichedRepo.GetByBatchAsync(batchId);
@@ -341,7 +341,7 @@ public class StepsController : ControllerBase
             await _stepRepo.SetSuccessAsync(stepId, result.FinishedAt);
         }
 
-        //MAGENTO
+        // Magento receives the requested run type and completes the external export.
         stepName = OrderedSteps[3];
         step = await _stepRepo.GetStepAsync(batchId, stepName);
         if (step == null)

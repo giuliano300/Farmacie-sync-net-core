@@ -45,7 +45,10 @@ public class FarmadatiProductBaseInfoProvider_TE006 : IProductBaseInfoProvider
             return new ProductBaseInfo { error = true };
         }
 
-        // 👉 cast se non hai tipo forte
+        if (result == null)
+            return new ProductBaseInfo { error = true };
+
+        // The generated SOAP type is consumed dynamically to keep provider parsing compact.
         dynamic r = result;
 
         if (r.NumRecords == 0 || string.IsNullOrWhiteSpace(r.OutputValue))

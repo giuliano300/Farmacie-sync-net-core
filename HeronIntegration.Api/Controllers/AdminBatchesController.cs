@@ -140,7 +140,7 @@ public class BatchController : ControllerBase
             await _batchRepo.SetRunningAsync(batchId);
             return true;
         }
-        catch (Exception e)
+        catch
         {
 
         }
@@ -159,7 +159,7 @@ public class BatchController : ControllerBase
             await _heronProcessor.ExecuteAsync(batchId, token);
             return true;
         }
-        catch(Exception e)
+        catch
         {
 
         }
@@ -230,7 +230,7 @@ public class BatchController : ControllerBase
 
             return true;
         }
-        catch (Exception e)
+        catch
         {
             return false;
         }

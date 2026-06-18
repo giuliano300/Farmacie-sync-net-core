@@ -1,3 +1,14 @@
 .vs/
 bin/
 obj/
+backups/
+temp-zip/
+_deploy/
+Export/
+SupplierFiles/
+HeronFolder/
+**/batch/
+**/batch_reports/
+*.user
+*.suo
+*.log

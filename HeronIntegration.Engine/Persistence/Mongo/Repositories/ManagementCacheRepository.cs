@@ -28,7 +28,7 @@ public class ManagementCacheRepository : IManagementCacheRepository
         {
             await _context.ManagementCaches.InsertOneAsync(cache);
         }
-        catch (Exception e)
+        catch
         {
 
         }
@@ -40,7 +40,7 @@ public class ManagementCacheRepository : IManagementCacheRepository
         {
             await _context.ManagementCaches.InsertManyAsync(cache);
         }
-        catch(Exception e)
+        catch
         {
 
         }

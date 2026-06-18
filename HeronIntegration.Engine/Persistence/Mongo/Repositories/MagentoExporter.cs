@@ -5,8 +5,11 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using HeronIntegration.Shared.Entities;
 using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
+using MongoDB.Driver;
+using MongoDB.Driver.GridFS;
 using Renci.SshNet;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
@@ -17,8 +20,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
-using MongoDB.Driver.GridFS;
-using System.Diagnostics;
 
 public class MagentoExporter : IMagentoExporter
 {
@@ -33,6 +34,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly GridFSBucket _gridFsBucket;
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
     private readonly IImportToMagentoStatusRepository _importToMagento;
+    private readonly IMongoDatabase _database;
     private const int MaxParallel = 20;
 
     public MagentoExporter(
@@ -44,7 +46,8 @@ public class MagentoExporter : IMagentoExporter
         ICustomerRepository customerRepo,
         IHostEnvironment env,
         ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository,
-        IImportToMagentoStatusRepository importToMagento)
+        IImportToMagentoStatusRepository importToMagento,
+        IMongoDatabase database)
     {
         _http = http;
         _imageStorage = imageStorage;
@@ -63,10 +66,13 @@ public class MagentoExporter : IMagentoExporter
         _env = env;
         _customerMagentoCategoriesRepository = customerMagentoCategoriesRepository;
         _importToMagento = importToMagento;
+        _database = database;
+
+        _gridFsBucket = new GridFSBucket(database);
     }
 
     // =====================================================
-    // 🔹 EXPORT SINGOLO (ORA USA PUT → UPSERT PIÙ VELOCE)
+    // Single product export path. The implementation uses PUT upsert.
     // =====================================================
     public async Task<MagentoInsertResult> ExportAsync(ResolvedProduct p, CancellationToken token)
     {
@@ -104,8 +110,7 @@ public class MagentoExporter : IMagentoExporter
             if (c == null)
                 return;
 
-            //AGGIORNAMENTO IMPORT STATUS
-            //AGGIORNA QUANTITA' DA IMPORTARE E SETTA A RUNNING LO STATO DELL' OPERAZIONE
+            // Start dashboard progress for product import.
             await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsToInsert: l.Count, insertProductsStatus: OperationsStatus.Running);
 
             //INVIO UNO PER UNO
@@ -151,11 +156,11 @@ public class MagentoExporter : IMagentoExporter
                             if(!item.Success)
                                 await _exportRepo.SetErrorAsync(batchId, item.Sku, item.Message);
                         }
-                        //AGGIORNA LO STATUS DELL'OPERAZIONE
+                        // Update dashboard progress for processed product chunks.
                         await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsInserted: elem);
                     });
 
-                //AGGIORNA LO STATUS DELL'OPERAZIONE TERMINANDOLA
+                // Mark product import as completed.
                 await _importToMagento.UpdateImportStatusAsync(batchId, insertProductsStatus: OperationsStatus.Ended);
             }
 
@@ -223,7 +228,7 @@ public class MagentoExporter : IMagentoExporter
         }
         catch (Exception ex)
         {
-
+            Console.WriteLine(ex.Message);
         }
     }
 
@@ -253,7 +258,7 @@ public class MagentoExporter : IMagentoExporter
 
                 var result =
                     System.Text.Json.JsonSerializer.Deserialize<ReindexStatus>(
-                        innerJson,
+                        innerJson!,
                         new JsonSerializerOptions
                         {
                             PropertyNameCaseInsensitive = true
@@ -332,7 +337,6 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task WaitPollingImagesAsync(string batchId, CancellationToken token)
     {
-        decimal? lastPercent = null;
         DateTime lastChange = DateTime.UtcNow;
         DateTime? firstErrorTime = null;
 
@@ -357,7 +361,7 @@ public class MagentoExporter : IMagentoExporter
 
                 var result =
                     System.Text.Json.JsonSerializer.Deserialize<ImagesImportStatus>(
-                        innerJson,
+                        innerJson!,
                         new JsonSerializerOptions
                         {
                             PropertyNameCaseInsensitive = true
@@ -388,8 +392,7 @@ public class MagentoExporter : IMagentoExporter
                         ExportStatus.InsertImages
                     );
 
-                    //AGGIORNAMENTO IMPORT STATUS
-                    //AGGIORNA QUANTITA' IMPORTATA
+                    // Update image import progress with newly confirmed SKUs.
                     await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesInserted: l.Count);
                 }
 
@@ -402,7 +405,7 @@ public class MagentoExporter : IMagentoExporter
 
                     if (!result.Running)
                     {
-                        //AGGIORNAMENTO IMPORT STATUS TERMINATO
+                        // Mark image import as completed when Magento reports no running work.
                         await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
                         break;
                     }
@@ -660,7 +663,7 @@ public class MagentoExporter : IMagentoExporter
                         }
                         catch (Exception ex)
                         {
-                          
+                            Console.WriteLine(ex.Message);
                         }
                     }
 
@@ -676,6 +679,7 @@ public class MagentoExporter : IMagentoExporter
                 }
                 catch (Exception ex)
                 {
+                    Console.WriteLine(ex.Message);
                 }
             }
 
@@ -742,6 +746,7 @@ public class MagentoExporter : IMagentoExporter
         }
         catch (Exception ex)
         {
+            Console.WriteLine(ex.Message);
         }
     }
 
@@ -893,6 +898,7 @@ public class MagentoExporter : IMagentoExporter
             }
             catch (Exception ex)
             {
+                Console.WriteLine(ex.Message);
             }
         }
 
@@ -1284,7 +1290,7 @@ public class MagentoExporter : IMagentoExporter
 
         while (!token.IsCancellationRequested)
         {
-            var status = await GetImportLogAsync(
+            var status = GetImportLogAsync(
                 customer,
                 batchId,
                 token);
@@ -1295,7 +1301,7 @@ public class MagentoExporter : IMagentoExporter
                 continue;
             }
 
-            var content = await GetSkuFileAsync(
+            var content = GetSkuFileAsync(
                 customer,
                 batchId,
                 token);
@@ -1309,7 +1315,7 @@ public class MagentoExporter : IMagentoExporter
                     .Where(x => x != null)
                     .ToList();
 
-                // 👉 OFFSET
+                // Read only the SKUs not processed by previous polling iterations.
                 var newSkus = allSkus.Skip(processedCount).ToList();
                 processedCount = allSkus.Count;
 
@@ -1354,7 +1360,7 @@ public class MagentoExporter : IMagentoExporter
         }
     }
 
-    private async Task<string> GetSkuFileAsync(
+    private string GetSkuFileAsync(
         Customer customer,
         string batchId,
         CancellationToken token)
@@ -1381,7 +1387,7 @@ public class MagentoExporter : IMagentoExporter
         return result.Result;
     }
 
-    private async Task<ImportStatus> GetImportLogAsync(
+    private ImportStatus GetImportLogAsync(
         Customer customer,
         string batchId,
         CancellationToken token)
@@ -1549,6 +1555,7 @@ public class MagentoExporter : IMagentoExporter
         }
         catch(Exception e) 
         { 
+            Console.WriteLine(e.Message);
         }
     }
 
@@ -1619,7 +1626,7 @@ public class MagentoExporter : IMagentoExporter
                     });
 
 
-                //AGGIORNA LO STATUS DELL'OPERAZIONE TERMINANDOLA
+                // Mark stock update as completed.
                 await _importToMagento.UpdateImportStatusAsync(batchId, updateProductsStatus: OperationsStatus.Ended);
 
             }
@@ -1670,6 +1677,7 @@ public class MagentoExporter : IMagentoExporter
             }
             catch(Exception e)
             {
+                Console.WriteLine(e.Message);
                 await _exportRepo.SetStatusBulkAsync(batch.ToList(), ExportStatus.Error);
             }
         }
@@ -1792,12 +1800,7 @@ public class MagentoExporter : IMagentoExporter
             var batchId =
                 products.First().BatchId.ToString();
 
-            /*
-            |--------------------------------------------------------------------------
-            |  AGGIORNAMENTO IMPORT STATUS
-               AGGIORNA QUANTITA' DA IMPORTARE E SETTA A RUNNING LO STATO DELL' OPERAZIONE
-            |--------------------------------------------------------------------------
-            */
+            // Start dashboard progress for image import.
 
             await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesToInsert: products.Count, insertImagesStatus: OperationsStatus.Running);
 
@@ -1887,6 +1890,7 @@ public class MagentoExporter : IMagentoExporter
         }
         catch(Exception e)
         {
+            Console.WriteLine(e.Message);
             return null;
         }
     }
@@ -1944,8 +1948,6 @@ public class MagentoExporter : IMagentoExporter
                          Index = index + 1
                      }))
                 .ToList();
-
-            int processed = 0;
 
             DebugZip(
                 $"START GRIDFS -> TOTAL:{allImages.Count}");
@@ -2222,7 +2224,7 @@ public class MagentoExporter : IMagentoExporter
                 var fileName = $"{prod.Aic}.jpg";
 
                 var base64 = await _imageStorage.GetBase64Async(
-                        (MongoDB.Bson.ObjectId)img.GridFsId!
+                        (MongoDB.Bson.ObjectId)img!.GridFsId!
                     );
 
                 var path = await SaveBase64ImageAsync(base64, prod.Aic!);
@@ -2236,6 +2238,7 @@ public class MagentoExporter : IMagentoExporter
             }
             catch(Exception e)
             {
+                Console.WriteLine(e.Message);
                 await _exportRepo.SetStatusAsync(prod.BatchId.ToString(), prod.Aic, ExportStatus.Error);
             }
 
@@ -2314,7 +2317,7 @@ public class MagentoExporter : IMagentoExporter
             new { attribute_code = "url_key", value = BuildUrlKey(p.Name, p.Aic) }
         };
 
-        // 👉 AGGIUNTA PREZZO SCONTATO
+        // Add special price when the original list price is greater than the current price.
         if (p.OriginalPrice > p.Price)
         {
             customAttributes.Add(new
@@ -2387,7 +2390,7 @@ public class MagentoExporter : IMagentoExporter
                 new { attribute_code = "short_description", value = p.ShortDescription },
                 new { attribute_code = "supplier", value = p.SupplierCode },
                 new { attribute_code = "manufacturer", value = p.Producer },
-                new { attribute_code = "url_key", value = BuildUrlKey(p.Name, p.Aic) }
+                new { attribute_code = "url_key", value = BuildUrlKey(p.Name!, p.Aic!) }
             },
 
                 extension_attributes = new
@@ -2400,7 +2403,7 @@ public class MagentoExporter : IMagentoExporter
         };
     }
 
-    private static string BuildUrlKey(string name, string sku)
+    private static string? BuildUrlKey(string name, string sku)
     {
         var slug = name
             .ToLowerInvariant()
@@ -2413,7 +2416,7 @@ public class MagentoExporter : IMagentoExporter
     }
 
     // =====================================================
-    // 🔹 GET ATTRIBUTE OPTIONS
+    // Reads and normalizes Magento attribute options.
     // =====================================================
     public async Task<Dictionary<string, int>> GetAttributeOptionsAsync(string attributeCode, CancellationToken token)
     {
@@ -2458,7 +2461,7 @@ public class MagentoExporter : IMagentoExporter
     }
 
     // =====================================================
-    // 🔹 GET CATEGORY MAP (FLATTEN TREE)
+    // Reads the Magento category tree and flattens it into a path-to-id map.
     // =====================================================
     public async Task<Dictionary<string, int>> GetCategoryMapAsync(CancellationToken token)
     {
@@ -2514,7 +2517,7 @@ public class MagentoExporter : IMagentoExporter
     }
 
     // =====================================================
-    // 🔹 RECURSIVE FLATTEN
+    // Recursively flattens a Magento category node.
     // =====================================================
     private void FlattenCategories(
         MagentoCategory node,
@@ -2611,7 +2614,7 @@ public class MagentoExporter : IMagentoExporter
                 var pageResult = System.Text.Json.JsonSerializer.Deserialize<ProductSearchResult>(json,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                if (pageResult.Items == null)
+                if (pageResult!.Items == null)
                     break;
                 foreach (var item in pageResult.Items)
                 {
@@ -2624,7 +2627,7 @@ public class MagentoExporter : IMagentoExporter
                     var description = item.CustomAttributes?
                         .FirstOrDefault(x => x.AttributeCode == "description")?.Value?.ToString();
 
-                    var cat = item.CustomAttributes.Where(a => a.AttributeCode.Contains("cat")).ToList();
+                    var cat = item!.CustomAttributes!.Where(a => a.AttributeCode.Contains("cat")).ToList();
 
                    var Categories = ExtractCategories(item.ExtensionAttributes!);
 
@@ -2632,15 +2635,15 @@ public class MagentoExporter : IMagentoExporter
                     {
                         Sku = item.Sku,
                         Price = item.Price,
-                        Manufacturer = manufacturer,
-                        Supplier = supplier,
-                        Description = description,
+                        Manufacturer = manufacturer!,
+                        Supplier = supplier!,
+                        Description = description!,
                         Categories = Categories
                     });
                 }
 
                 total = pageResult.TotalCount;
-                //AGGIORNAMENTO BATCH
+                // Store Magento download progress on the batch.
                 await _batchRepo.UpdateDownloadProducts(batchId, total, result.Count);
 
                 page++;
@@ -2937,7 +2940,7 @@ public class MagentoExporter : IMagentoExporter
                 ? cleanName
                 : $"{parentPath}/{cleanName}";
 
-            // 👉 filtro livelli inutili (consigliato)
+            // Keep only levels useful for product mapping.
             if (node.Level <= 4)
             {
                 result.Add(new CustomerMagentoCategories
@@ -3097,6 +3100,7 @@ public class MagentoExporter : IMagentoExporter
         }
         catch (Exception ex)
         {
+            Console.WriteLine(ex.Message);
             return null;
         }
     }

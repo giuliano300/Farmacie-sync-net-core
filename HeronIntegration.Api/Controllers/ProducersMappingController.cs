@@ -119,7 +119,7 @@ public class ProducerMappingsController : ControllerBase
             var exporter = _magentoExporterFactory.Create(customer.Magento);
             var token = _processManager.Start(ProcessType.Singoli, "");
 
-            //Import Magento-->Mongo
+            // Import Magento producers into Mongo for mapping review.
             var nodes = await exporter.GetAttributeManufacturerAsync(token);
             var producers = nodes.Where(a => a.value != "" && a.value != null).Select(o => new CustomerMagentoProducer
             {
@@ -132,7 +132,7 @@ public class ProducerMappingsController : ControllerBase
 
             await _customeMagentoRepo.CreateAsync(customerId, producers);
 
-            //Import Heron-->Mongo
+            // Import Heron producers into Mongo for mapping review.
             var root = _env.ContentRootPath;
             var parent = Directory.GetParent(root)!.FullName;
 

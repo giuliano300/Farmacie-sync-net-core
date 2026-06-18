@@ -9,75 +9,125 @@ namespace HeronIntegration.Engine.Workers;
 
 public class BatchOrchestratorWorker : BackgroundService
 {
+    // Keep the orchestrator responsive without hammering MongoDB.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+
     private readonly ILogger<BatchOrchestratorWorker> _logger;
-    private readonly IBatchRepository _batchRepo;
-    private readonly IStepRepository _stepRepo;
-    private readonly IEnumerable<IStepProcessor> _processors;
-    private readonly IBatchFinalizerService _batchFinalizer;
-    private readonly IMagentoExporterFactory _magentoExporterFactory;
-    private readonly ICustomerRepository _customerRepo;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly BatchProcessManager _processManager;
 
 
     public BatchOrchestratorWorker(
         ILogger<BatchOrchestratorWorker> logger,
-        IBatchRepository batchRepo,
-        IStepRepository stepRepo,
-        IEnumerable<IStepProcessor> processors,
-        IBatchFinalizerService batchFinalizer,
-        IMagentoExporterFactory magentoExporterFactory,
-        ICustomerRepository customerRepo,
+        IServiceScopeFactory scopeFactory,
         BatchProcessManager processManager
     )
     {
         _logger = logger;
-        _batchRepo = batchRepo;
-        _stepRepo = stepRepo;
-        _processors = processors;
-        _batchFinalizer = batchFinalizer;
-        _magentoExporterFactory = magentoExporterFactory;
-        _customerRepo = customerRepo;
+        _scopeFactory = scopeFactory;
         _processManager = processManager;
     }
 
+    /// <summary>
+    /// Polls running batches and advances each one by a single step per cycle.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Batch Orchestrator started");
 
-        while (!stoppingToken.IsCancellationRequested)
+        using var timer = new PeriodicTimer(PollInterval);
+
+        try
         {
-            await RunPipeline(stoppingToken);
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            do
+            {
+                // One failed cycle must not kill the hosted service; the next timer tick will retry.
+                try
+                {
+                    await RunPipeline(stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Errore ciclo Batch Orchestrator");
+                }
+            }
+            while (await timer.WaitForNextTickAsync(stoppingToken));
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Batch Orchestrator stopped");
         }
     }
 
+    /// <summary>
+    /// Loads running batches from MongoDB and executes or finalizes them.
+    /// </summary>
     private async Task RunPipeline(CancellationToken token)
     {
-        var runningBatches = await _batchRepo.GetRunningAsync();
+        using var scope = _scopeFactory.CreateScope();
+
+        // Resolve scoped dependencies per cycle so Mongo repositories do not outlive their intended scope.
+        var batchRepo = scope.ServiceProvider.GetRequiredService<IBatchRepository>();
+        var stepRepo = scope.ServiceProvider.GetRequiredService<IStepRepository>();
+        var processors = scope.ServiceProvider.GetRequiredService<IEnumerable<IStepProcessor>>();
+        var batchFinalizer = scope.ServiceProvider.GetRequiredService<IBatchFinalizerService>();
+        var magentoExporterFactory = scope.ServiceProvider.GetRequiredService<IMagentoExporterFactory>();
+        var customerRepo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
+
+        var runningBatches = await batchRepo.GetRunningAsync();
 
         foreach (var batch in runningBatches)
         {
-            var nextStep = await _stepRepo.GetNextPendingStepAsync(batch.Id.ToString());
-
-            if (nextStep == null)
+            // Batch-level isolation: one broken batch does not block the rest of the queue.
+            try
             {
-                await FinalizeBatch(batch.Id.ToString(), token);
-                continue;
-            }
+                var nextStep = await stepRepo.GetNextPendingStepAsync(batch.Id.ToString());
 
-            await ExecuteStep(nextStep);
+                if (nextStep == null)
+                {
+                    // No pending steps means the import/export pipeline has completed and can be closed.
+                    await FinalizeBatch(
+                        batch.Id.ToString(),
+                        batchRepo,
+                        customerRepo,
+                        magentoExporterFactory,
+                        batchFinalizer,
+                        token);
+                    continue;
+                }
+
+                await ExecuteStep(nextStep, stepRepo, processors);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Errore orchestrazione batch {BatchId}", batch.Id);
+            }
         }
     }
 
-    private async Task ExecuteStep(StepExecution step)
+    /// <summary>
+    /// Resolves the processor for a step, executes it and persists the final step status.
+    /// </summary>
+    private async Task ExecuteStep(
+        StepExecution step,
+        IStepRepository stepRepo,
+        IEnumerable<IStepProcessor> processors)
     {
-        await _stepRepo.SetRunningAsync(step.Id.ToString());
-        var StartedAt = DateTime.UtcNow;
+        await stepRepo.SetRunningAsync(step.Id.ToString());
         try
         {
+            // The process manager keeps a cancellation token per running batch for manual stop operations.
             var token = _processManager.Start(ProcessType.Batch, step.BatchId.ToString());
 
-            var processor = _processors
+            var processor = processors
                 .FirstOrDefault(p => p.Step == step.Step);
 
             if (processor == null)
@@ -85,29 +135,57 @@ public class BatchOrchestratorWorker : BackgroundService
 
             await processor.ExecuteAsync(step.BatchId.ToString(), token);
 
-            await _stepRepo.SetSuccessAsync(step.Id.ToString(), DateTime.UtcNow);
+            await stepRepo.SetSuccessAsync(step.Id.ToString(), DateTime.UtcNow);
         }
         catch (Exception ex)
         {
-            await _stepRepo.SetErrorAsync(step.Id.ToString(), ex.Message);
+            await stepRepo.SetErrorAsync(step.Id.ToString(), ex.Message);
 
             _logger.LogError(ex,
                 "Errore esecuzione step {Step} Batch {Batch}",
                 step.Step,
                 step.BatchId);
         }
+        finally
+        {
+            // A step execution owns one cancellation slot; always release it when the processor returns.
+            _processManager.Stop(ProcessType.Batch, step.BatchId.ToString());
+        }
     }
 
-    private async Task FinalizeBatch(string batchId, CancellationToken token)
+    /// <summary>
+    /// Runs Magento cron, saves the final report and closes a batch with no pending steps.
+    /// </summary>
+    private async Task FinalizeBatch(
+        string batchId,
+        IBatchRepository batchRepo,
+        ICustomerRepository customerRepo,
+        IMagentoExporterFactory magentoExporterFactory,
+        IBatchFinalizerService batchFinalizer,
+        CancellationToken token)
     {
-        var batch = await _batchRepo.GetByIdAsync(batchId);
-        var customer = await _customerRepo.GetByIdAsync(batch!.CustomerId);
+        var batch = await batchRepo.GetByIdAsync(batchId);
+        if (batch == null)
+        {
+            _logger.LogWarning("Batch {BatchId} non trovato in finalizzazione", batchId);
+            return;
+        }
 
-        var exporter = _magentoExporterFactory.Create(customer!.Magento!);
+        var customer = await customerRepo.GetByIdAsync(batch.CustomerId);
+        if (customer?.Magento == null)
+        {
+            _logger.LogWarning(
+                "Customer o configurazione Magento mancanti per batch {BatchId}",
+                batchId);
+            return;
+        }
 
+        var exporter = magentoExporterFactory.Create(customer.Magento);
+
+        // Magento cron must run before report cleanup so Magento-side async jobs can complete.
         await exporter.RunMagentoCronAsync(token);
 
-        await _batchFinalizer.FinalizeBatchAsync(batchId);
+        await batchFinalizer.FinalizeBatchAsync(batchId);
 
         _logger.LogInformation("Batch {BatchId} chiuso", batchId);
     }

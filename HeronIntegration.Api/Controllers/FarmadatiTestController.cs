@@ -206,13 +206,13 @@ public class FarmadatiTestController : ControllerBase
     public class ProductMongo
     {
         [JsonPropertyName("ProductName")]
-        public string ProductName { get; set; }
+        public string ProductName { get; set; } = string.Empty;
 
         [JsonPropertyName("CustomerId")]
-        public string CustomerId { get; set; }
+        public string CustomerId { get; set; } = string.Empty;
 
         [JsonPropertyName("Aic")]
-        public string Aic { get; set; }
+        public string Aic { get; set; } = string.Empty;
     }
 
 };

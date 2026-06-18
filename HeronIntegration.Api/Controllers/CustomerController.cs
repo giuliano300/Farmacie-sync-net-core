@@ -145,7 +145,7 @@ public class CustomersController : ControllerBase
             await _repo.UpdateAsync(customer);
             return true;
         }
-        catch(Exception e)
+        catch
         {
             return false;
         }
@@ -159,18 +159,21 @@ public class CustomersController : ControllerBase
             await _repo.DeleteAsync(id);
             return true;
         }
-        catch (Exception e)
+        catch
         {
             return false;
         }
     }
 
     [HttpPost("login")]
-    public async Task<Customer> Login(Login req)
+    public async Task<ActionResult<Customer>> Login(Login req)
     {
         var c = await _repo.Login(req);
 
-        return c;
+        if (c == null)
+            return Unauthorized();
+
+        return Ok(c);
     }
 
 }

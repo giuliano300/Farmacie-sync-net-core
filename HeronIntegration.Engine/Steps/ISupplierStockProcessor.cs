@@ -8,7 +8,7 @@ namespace HeronIntegration.Engine.Steps
 {
     public interface ISupplierStockProcessor
     {
-        Task<string> DownloadAsync(string supplierCode);
+        Task<string?> DownloadAsync(string supplierCode);
         Task<bool> ImportAsync(string supplierCode);
         Task RunAsync(string supplierCode);
 

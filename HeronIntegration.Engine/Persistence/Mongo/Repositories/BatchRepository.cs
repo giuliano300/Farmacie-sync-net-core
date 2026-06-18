@@ -57,7 +57,7 @@ public class BatchRepository : IBatchRepository
 
         if (y == null)
         {
-            // 👉 tutti i batch aperti
+            // All open batches.
             filter = statusFilter;
         }
         else

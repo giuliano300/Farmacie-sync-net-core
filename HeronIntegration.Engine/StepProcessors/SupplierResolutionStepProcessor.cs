@@ -9,6 +9,7 @@ namespace HeronIntegration.Engine.StepProcessors;
 
 public class SupplierResolutionStepProcessor : IStepProcessor
 {
+    // Must match the supplier resolution step generated for each batch.
     public string Step => "Suppliers";
 
     private readonly IEnrichedProductRepository _enrichedRepo;
@@ -32,6 +33,9 @@ public class SupplierResolutionStepProcessor : IStepProcessor
         _cleanupService = cleanupService;
     }
 
+    /// <summary>
+    /// Chooses the best stock source for each enriched product and creates resolved products.
+    /// </summary>
     public async Task<StepExecutionResult> ExecuteAsync(string batchId, CancellationToken token, TypeRun? type = null)
     {
         var result = new StepExecutionResult
@@ -41,7 +45,7 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 
         try
         {
-
+            // Clear stale export status before rebuilding resolved products.
             await _cleanupService.updateExportExecution(batchId);
 
             var step = await _stepRepo.GetStepAsync(batchId, "Suppliers");
@@ -60,13 +64,13 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 
             var batchObjectId = ObjectId.Parse(batchId);
 
-            // 1. Recupero tutti gli AIC necessari
+            // Collect all needed AICs so supplier stock can be loaded with one query.
             var aics = raws.Select(x => x.Aic).Distinct().ToList();
 
-            // 2. Carico tutti gli stock supplier in UNA sola query
+            // One bulk query avoids an N+1 lookup per product.
             var supplierStocks = await _supplierRepo.GetByAicsAsync(aics);
 
-            // 3. Miglior supplier (prezzo minimo) per AIC
+            // Select the cheapest supplier that has stock for each AIC.
             var bestSupplierByAic = supplierStocks
                 .Where(a=>a.Availability > 0)
                 .GroupBy(x => x.Aic)
@@ -79,7 +83,7 @@ public class SupplierResolutionStepProcessor : IStepProcessor
 
             foreach (var raw in raws)
             {
-                // HERON sempre candidato
+                // Heron stock is always the default candidate.
                 var chosen = new SupplierStock
                 {
                     SupplierCode = "HERON",
@@ -88,7 +92,7 @@ public class SupplierResolutionStepProcessor : IStepProcessor
                     Availability = raw.HeronStock
                 };
 
-                // supplier alternativi
+                // Alternative suppliers are used only when Heron has no availability.
                 if (bestSupplierByAic.TryGetValue(raw.Aic, out var best) && chosen.Availability == 0)
                        chosen = best;
 

@@ -87,12 +87,12 @@ public class CategoryMappingsController : ControllerBase
             var exporter = _magentoExporterFactory.Create(customer.Magento);
             var token = _processManager.Start(ProcessType.Singoli, "");
 
-            //Import Magento-->Mongo
+            // Import Magento categories into Mongo for mapping review.
             var nodes = await exporter.GetCategoryAsync(token);
             var categories = exporter.FlattenCategoriesNodes(nodes, customerId, "Default Category");
             await _customeMagentoRepo.CreateAsync(customerId, categories);
 
-            //Import Heron-->Mongo
+            // Import Heron categories into Mongo for mapping review.
             var root = _env.ContentRootPath;
             var parent = Directory.GetParent(root)!.FullName;
 
@@ -120,7 +120,7 @@ public class CategoryMappingsController : ControllerBase
                 .Where(p => !string.IsNullOrWhiteSpace(p.Category))
                 .Select(p =>
                 {
-                    var categoria = p.Category.Trim();
+                    var categoria = p.Category!.Trim();
                     var sotto = p.SubCategory?.Trim() ?? "";
 
                     var key = $"{categoria}|{sotto}";
