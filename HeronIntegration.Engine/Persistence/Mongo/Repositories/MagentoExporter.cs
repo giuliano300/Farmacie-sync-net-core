@@ -211,8 +211,8 @@ public class MagentoExporter : IMagentoExporter
                 );
 
             using var response =
-                await _http.PostAsync(
-                    $"{BaseUrl}/rest/V1/heron/reindex",
+                await PostHeronAsync(
+                    "reindex",
                     content,
                     token
                 );
@@ -246,8 +246,8 @@ public class MagentoExporter : IMagentoExporter
         {
             try
             {
-                var response = await _http.GetStringAsync(
-                    $"{BaseUrl}/rest/V1/heron/reindex-status/{batchId}",
+                var response = await GetHeronStringAsync(
+                    $"reindex-status/{batchId}",
                     token);
 
                 // Se la chiamata va a buon fine azzero il timer degli errori
@@ -348,8 +348,8 @@ public class MagentoExporter : IMagentoExporter
             try
             {
                 var response =
-                await _http.GetStringAsync(
-                    $"{BaseUrl}/rest/V1/heron/images-status/{batchId}",
+                await GetHeronStringAsync(
+                    $"images-status/{batchId}",
                     token
                 );
 
@@ -444,9 +444,9 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task CleanIndex(CancellationToken token)
     {
-        var response =
-            await _http.PostAsync(
-                $"{BaseUrl}/rest/V1/heron/clean-index",
+        using var response =
+            await PostHeronAsync(
+                "clean-index",
                 null,
                 token
             );
@@ -459,9 +459,9 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task CleanCache(CancellationToken token)
     {
-        var response =
-            await _http.PostAsync(
-                $"{BaseUrl}/rest/V1/heron/clean-cache",
+        using var response =
+            await PostHeronAsync(
+                "clean-cache",
                 null,
                 token
             );
@@ -474,9 +474,26 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task DeleteProducts()
     {
-        var response =
-            await _http.PostAsync(
-                $"{BaseUrl}/rest/V1/heron/delete-products", null
+        var json =
+            System.Text.Json.JsonSerializer.Serialize(
+                new
+                {
+                    confirmationCode = "DELETE_ALL_PRODUCTS"
+                }
+            );
+
+        using var content =
+            new StringContent(
+                json,
+                Encoding.UTF8,
+                "application/json"
+            );
+
+        using var response =
+            await PostHeronAsync(
+                "delete-products",
+                content,
+                CancellationToken.None
             );
 
         Console.WriteLine(response);
@@ -523,8 +540,8 @@ public class MagentoExporter : IMagentoExporter
             );
 
         using var response =
-            await _http.PostAsync(
-                $"{BaseUrl}/rest/V1/heron/import-products",
+            await PostHeronAsync(
+                "import-products",
                 content,
                 token
             );
@@ -588,8 +605,8 @@ public class MagentoExporter : IMagentoExporter
             );
 
         using var response =
-            await _http.PostAsync(
-                $"{BaseUrl}/rest/V1/heron/update-qty",
+            await PostHeronAsync(
+                "update-qty",
                 content,
                 token
             );
@@ -722,8 +739,8 @@ public class MagentoExporter : IMagentoExporter
             */
 
             using var response =
-                await _http.PostAsync(
-                    $"{BaseUrl}/rest/V1/heron/images",
+                await PostHeronAsync(
+                    "images",
                     content,
                     token
                 );
@@ -1870,10 +1887,13 @@ public class MagentoExporter : IMagentoExporter
             |--------------------------------------------------------------------------
             */
 
-            await _http.PostAsync(
-                $"{BaseUrl}/rest/V1/heron/images-local/{batchId}",
-                null,
-                token);
+            using var response =
+                await PostHeronAsync(
+                    $"images-local/{batchId}",
+                    null,
+                    token);
+
+            response.EnsureSuccessStatusCode();
 
             /*
             |--------------------------------------------------------------------------
@@ -2290,6 +2310,66 @@ public class MagentoExporter : IMagentoExporter
                 throw new Exception(body);
             }
         }
+
+    private async Task<HttpResponseMessage> PostHeronAsync(
+        string route,
+        HttpContent? content,
+        CancellationToken token)
+    {
+        var request =
+            CreateHeronRequest(
+                HttpMethod.Post,
+                route
+            );
+
+        request.Content = content;
+
+        return await _http.SendAsync(
+            request,
+            token
+        );
+    }
+
+    private async Task<string> GetHeronStringAsync(
+        string route,
+        CancellationToken token)
+    {
+        using var request =
+            CreateHeronRequest(
+                HttpMethod.Get,
+                route
+            );
+
+        using var response =
+            await _http.SendAsync(
+                request,
+                token
+            );
+
+        response.EnsureSuccessStatusCode();
+
+        return await response.Content
+            .ReadAsStringAsync(token);
+    }
+
+    private HttpRequestMessage CreateHeronRequest(
+        HttpMethod method,
+        string route)
+    {
+        var request =
+            new HttpRequestMessage(
+                method,
+                $"{BaseUrl}/rest/V1/heron/{route.TrimStart('/')}"
+            );
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue(
+                "Bearer",
+                _magento.Token
+            );
+
+        return request;
+    }
 
     // =====================================================
     // 🏗 COSTRUZIONE PRODOTTO

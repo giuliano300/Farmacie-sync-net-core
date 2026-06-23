@@ -10,6 +10,7 @@ using MongoDB.Bson;
 using MongoDB.Driver;
 using Newtonsoft.Json.Linq;
 using SharpCompress.Common;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using static System.Net.WebRequestMethods;
 
@@ -83,7 +84,26 @@ public class DashboardController : ControllerBase
         {
             var url = $"{BaseUrl}/rest/V1/heron/reindex-status/{batchId}";
 
-            var response = await _http.GetStringAsync(url);
+            using var request =
+                new HttpRequestMessage(
+                    HttpMethod.Get,
+                    url
+                );
+
+            request.Headers.Authorization =
+                new AuthenticationHeaderValue(
+                    "Bearer",
+                    customer.Magento.Token
+                );
+
+            using var httpResponse =
+                await _http.SendAsync(request);
+
+            httpResponse.EnsureSuccessStatusCode();
+
+            var response =
+                await httpResponse.Content
+                    .ReadAsStringAsync();
 
             Console.WriteLine(response);
 
