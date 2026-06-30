@@ -19,4 +19,11 @@
     <ProjectReference Include="..\HeronIntegration.Shared\HeronIntegration.Shared.csproj" />
   </ItemGroup>
 
+  <Target Name="RemoveEngineAppSettingsFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.RelativePath)' == 'appsettings.json' and $([System.String]::Copy('%(ResolvedFileToPublish.FullPath)').Contains('HeronIntegration.Engine'))" />
+    </ItemGroup>
+  </Target>
+
 </Project>
