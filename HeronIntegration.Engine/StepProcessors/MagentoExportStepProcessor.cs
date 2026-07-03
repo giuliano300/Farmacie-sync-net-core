@@ -100,7 +100,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             }
 
             // Price/quantity update can run independently from full product import.
-            if (type is TypeRun.Completo or TypeRun.UpdatePrezzi)
+            if (type is TypeRun.UpdatePrezzi)
             {
                 skus = (await HandleStockUpdate(metadata, mapped, exporter, batchId, token)!).Select(a => a.Sku).ToList();
                 foreach (var skuToReindex in skus)
