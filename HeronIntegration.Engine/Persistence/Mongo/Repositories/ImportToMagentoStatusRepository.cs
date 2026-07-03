@@ -168,7 +168,7 @@ public class ImportToMagentoStatusRepository : IImportToMagentoStatusRepository
         {
             InsertProducts = type == TypeRun.Completo || type == TypeRun.ImportProdotti ? true : false,
             InsertImages = type == TypeRun.Completo || type == TypeRun.ImportImmagini ? true : false,
-            UpdateQty = type == TypeRun.UpdatePrezzi ? true : false,
+            UpdateQty = type == TypeRun.Completo || type == TypeRun.UpdatePrezzi ? true : false,
             BatchId = batchId,
             TotalProducts = TotalProducts,
             Import = OperationsStatus.Running

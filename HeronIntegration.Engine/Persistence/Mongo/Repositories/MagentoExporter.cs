@@ -1649,7 +1649,7 @@ public class MagentoExporter : IMagentoExporter
             }
             else
                 //INVIO BULK
-                await UpdateQuantityMsiAsync(items, token);
+                await UpdateQuantityMsiAsync(batchId, items, token);
 
         }
         catch (OperationCanceledException)
@@ -1657,7 +1657,7 @@ public class MagentoExporter : IMagentoExporter
             // cancellazione → ignora
         }
     }
-    private async Task UpdateQuantityMsiAsync(List<InventoryItem> items, CancellationToken token)
+    private async Task UpdateQuantityMsiAsync(string batchId, List<InventoryItem> items, CancellationToken token)
     {
         const int batchSize = 1000;
 
@@ -1689,7 +1689,10 @@ public class MagentoExporter : IMagentoExporter
 
                 await SendAsync(req, token);
 
-                await _exportRepo.SetStatusBulkAsync(batch.ToList(), ExportStatus.UpdatePrice);
+                var chunk = batch.ToList();
+
+                await _exportRepo.SetStatusBulkAsync(chunk, ExportStatus.UpdatePrice);
+                await _importToMagento.UpdateImportStatusAsync(batchId, totalProductsUpdated: chunk.Count);
 
             }
             catch(Exception e)
@@ -1698,6 +1701,8 @@ public class MagentoExporter : IMagentoExporter
                 await _exportRepo.SetStatusBulkAsync(batch.ToList(), ExportStatus.Error);
             }
         }
+
+        await _importToMagento.UpdateImportStatusAsync(batchId, updateProductsStatus: OperationsStatus.Ended);
     }
     private async Task UpdateQuantityAsync(string batchId, string sku, int qty, CancellationToken token)
     {

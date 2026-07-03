@@ -90,13 +90,22 @@ public class MagentoExportStepProcessor : IStepProcessor
                await _importToMagento.Start(batchId, mapped.Count, type!);
 
             var skus = new List<string>();
+            var touchedSkus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             // Product import creates missing products and updates changed product data.
             if (type is TypeRun.Completo or TypeRun.ImportProdotti)
+            {
                 skus = await HandleProductUpsert(metadata, mapped, exporter, batchId, token, type);
+                foreach (var skuToReindex in skus)
+                    touchedSkus.Add(skuToReindex);
+            }
 
             // Price/quantity update can run independently from full product import.
-            if (type is TypeRun.UpdatePrezzi)
+            if (type is TypeRun.Completo or TypeRun.UpdatePrezzi)
+            {
                 skus = (await HandleStockUpdate(metadata, mapped, exporter, batchId, token)!).Select(a => a.Sku).ToList();
+                foreach (var skuToReindex in skus)
+                    touchedSkus.Add(skuToReindex);
+            }
 
             // Image import stages files on FTP and waits for the Magento custom API to finish.
             if (type is TypeRun.Completo or TypeRun.ImportImmagini)
@@ -105,12 +114,17 @@ public class MagentoExportStepProcessor : IStepProcessor
                 if(productWithImages.Count > 0)
                 {
                     if (type is TypeRun.ImportImmagini)
+                    {
                         skus = productWithImages.Select(a => a.Aic).ToList();
+                        foreach (var skuToReindex in skus)
+                            touchedSkus.Add(skuToReindex);
+                    }
                     await exporter.ImportImagesToFtpBulkAsync(productWithImages!, customer, token);
                     await exporter.WaitPollingImagesAsync(batchId, token);
                 }
             }
 
+            skus = touchedSkus.ToList();
             if (skus.Count > 0)
             {
                 // Reindex only SKUs touched by this run and then clean Magento caches.
