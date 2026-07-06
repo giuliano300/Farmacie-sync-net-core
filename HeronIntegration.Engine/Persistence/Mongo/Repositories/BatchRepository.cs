@@ -80,6 +80,13 @@ public class BatchRepository : IBatchRepository
             .ToListAsync();
     }
 
+    public async Task<List<BatchExecution>> GetOpenStartedBeforeAsync(DateTime startedBeforeUtc)
+    {
+        return await _context.BatchExecutions
+            .Find(x => x.Status != BatchStatus.Closed && x.StartedAt < startedBeforeUtc)
+            .ToListAsync();
+    }
+
     public async Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId)
     {
         var todayStart = DateTime.UtcNow.Date;
@@ -100,6 +107,13 @@ public class BatchRepository : IBatchRepository
     {
         return await _context.BatchExecutions
             .Find(x => x.CustomerId == customerId && x.Status == BatchStatus.Running)
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<BatchExecution?> GetByTriggerReasonAsync(string customerId, string triggerReason)
+    {
+        return await _context.BatchExecutions
+            .Find(x => x.CustomerId == customerId && x.TriggerReason == triggerReason)
             .FirstOrDefaultAsync();
     }
 

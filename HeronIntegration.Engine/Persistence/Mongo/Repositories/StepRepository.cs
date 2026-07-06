@@ -8,6 +8,14 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories;
 
 public class StepRepository : IStepRepository
 {
+    private static readonly Dictionary<string, int> StepOrder = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["HeronImport"] = 1,
+        ["Farmadati"] = 2,
+        ["Suppliers"] = 3,
+        ["Magento"] = 4
+    };
+
     private readonly MongoContext _context;
 
     public StepRepository(MongoContext context)
@@ -78,12 +86,16 @@ public class StepRepository : IStepRepository
 
     public async Task<StepExecution?> GetNextPendingStepAsync(string batchId)
     {
-        return await _context.StepExecutions
+        var pendingSteps = await _context.StepExecutions
             .Find(x =>
                 x.BatchId == ObjectId.Parse(batchId) &&
                 x.Status == StepStatus.Pending)
-            .SortBy(x => x.Step)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+
+        return pendingSteps
+            .OrderBy(x => StepOrder.GetValueOrDefault(x.Step, int.MaxValue))
+            .ThenBy(x => x.StartedAt)
+            .FirstOrDefault();
     }
 
     public async Task CreateDefaultStepsAsync(string batchId, string customerId)
@@ -114,10 +126,13 @@ public class StepRepository : IStepRepository
 
     public async Task<List<StepExecution>> GetByBatchAsync(string batchId)
     {
-        return await _context.StepExecutions
+        var steps = await _context.StepExecutions
             .Find(x => x.BatchId == ObjectId.Parse(batchId))
-            .SortBy(x => x.Step)
             .ToListAsync();
+
+        return steps
+            .OrderBy(x => StepOrder.GetValueOrDefault(x.Step, int.MaxValue))
+            .ToList();
     }
 
 

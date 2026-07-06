@@ -100,7 +100,7 @@ public class BatchOrchestratorWorker : BackgroundService
                     continue;
                 }
 
-                await ExecuteStep(nextStep, stepRepo, processors);
+                await ExecuteStep(batch, nextStep, stepRepo, processors);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -117,6 +117,7 @@ public class BatchOrchestratorWorker : BackgroundService
     /// Resolves the processor for a step, executes it and persists the final step status.
     /// </summary>
     private async Task ExecuteStep(
+        BatchExecution batch,
         StepExecution step,
         IStepRepository stepRepo,
         IEnumerable<IStepProcessor> processors)
@@ -133,7 +134,7 @@ public class BatchOrchestratorWorker : BackgroundService
             if (processor == null)
                 throw new Exception($"Processor non trovato per step {step.Step}");
 
-            await processor.ExecuteAsync(step.BatchId.ToString(), token);
+            await processor.ExecuteAsync(step.BatchId.ToString(), token, batch.type);
 
             await stepRepo.SetSuccessAsync(step.Id.ToString(), DateTime.UtcNow);
         }

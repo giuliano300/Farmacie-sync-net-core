@@ -8,6 +8,7 @@ public interface IBatchRepository
 
     Task<List<BatchExecution>> GetLastAsync(int limit);
     Task<BatchExecution?> GetRunningBatchAsync(string customerId);
+    Task<BatchExecution?> GetByTriggerReasonAsync(string customerId, string triggerReason);
 
     Task<List<BatchExecution>> GetRunningAsync();
 
@@ -40,5 +41,6 @@ public interface IBatchRepository
     Task DeleteAsync(string id);
 
     Task<List<BatchExecution>> GetOpenBatchesAsync(DateTime? yesterday = null);
+    Task<List<BatchExecution>> GetOpenStartedBeforeAsync(DateTime startedBeforeUtc);
 
 }

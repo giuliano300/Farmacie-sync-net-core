@@ -8,8 +8,7 @@ namespace HeronIntegration.Engine.Workers;
 
 public class SupplierFileImporterWorker : BackgroundService
 {
-    // Stock feed imports are periodic snapshots; 30 minutes keeps data fresh without overloading FTP endpoints.
-    private static readonly TimeSpan ImportInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeOnly ScheduledTime = new(0, 0);
 
     private readonly IConfiguration _config;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -26,25 +25,41 @@ public class SupplierFileImporterWorker : BackgroundService
     }
 
     /// <summary>
-    /// Periodically downloads supplier stock files and refreshes supplier stock collections.
+    /// Downloads supplier stock files once per day at midnight and refreshes supplier stock collections.
     /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
-            using var timer = new PeriodicTimer(ImportInterval);
-
-            do
+            while (!stoppingToken.IsCancellationRequested)
             {
-                // Import failures are handled per supplier inside the cycle.
+                var delay = GetDelayUntilNextRun(DateTime.Now);
+                _logger.LogInformation(
+                    "Supplier file importer schedulato alle {ScheduledTime}. Prossima esecuzione tra {Delay}",
+                    ScheduledTime,
+                    delay);
+
+                await Task.Delay(delay, stoppingToken);
+
                 await ImportAllSuppliers(stoppingToken);
             }
-            while (await timer.WaitForNextTickAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             _logger.LogInformation("Supplier file importer stopped");
         }
+    }
+
+    private static TimeSpan GetDelayUntilNextRun(DateTime now)
+    {
+        var nextRun = now.Date.Add(ScheduledTime.ToTimeSpan());
+
+        if (nextRun <= now)
+        {
+            nextRun = nextRun.AddDays(1);
+        }
+
+        return nextRun - now;
     }
 
     /// <summary>
