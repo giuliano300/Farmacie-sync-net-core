@@ -35,6 +35,7 @@ public class MagentoExporter : IMagentoExporter
     private string BaseUrl => _magento.BaseUrl.TrimEnd('/');
     private readonly IImportToMagentoStatusRepository _importToMagento;
     private readonly IMongoDatabase _database;
+    private readonly ILogger<MagentoExporter> _logger;
     private const int MaxParallel = 20;
     private const int MagentoProductsPageSize = 300;
     private const int MagentoProductsMaxAttempts = 3;
@@ -49,7 +50,8 @@ public class MagentoExporter : IMagentoExporter
         IHostEnvironment env,
         ICustomerMagentoCategoriesRepository customerMagentoCategoriesRepository,
         IImportToMagentoStatusRepository importToMagento,
-        IMongoDatabase database)
+        IMongoDatabase database,
+        ILogger<MagentoExporter> logger)
     {
         _http = http;
         _imageStorage = imageStorage;
@@ -69,6 +71,7 @@ public class MagentoExporter : IMagentoExporter
         _customerMagentoCategoriesRepository = customerMagentoCategoriesRepository;
         _importToMagento = importToMagento;
         _database = database;
+        _logger = logger;
 
         _gridFsBucket = new GridFSBucket(database);
     }
@@ -2673,6 +2676,7 @@ public class MagentoExporter : IMagentoExporter
         var result = new List<MagentoSlimProduct>();
         var page = 1;
         var total = 0;
+        var url = string.Empty;
         await _batchRepo.UpdateDownloadProducts(batchId, 0, 0);
 
         do
@@ -2681,7 +2685,7 @@ public class MagentoExporter : IMagentoExporter
             {
                 token.ThrowIfCancellationRequested();
 
-                var url =
+                url =
                     $"{BaseUrl}/rest/V1/products?" +
                     $"searchCriteria[currentPage]={page}&" +
                     $"searchCriteria[pageSize]={MagentoProductsPageSize}&" +
@@ -2739,7 +2743,14 @@ public class MagentoExporter : IMagentoExporter
             catch(Exception e)
             {
                 await _batchRepo.UpdateDownloadProducts(batchId, total, result.Count);
-                Console.WriteLine($"Pagina prodotti Magento saltata batch {batchId}, pagina {page}, scaricati {result.Count}/{total}: {e}");
+                _logger.LogError(
+                    e,
+                    "Pagina prodotti Magento saltata. BatchId: {BatchId}; Page: {Page}; Downloaded: {Downloaded}; Total: {Total}; Url: {Url}",
+                    batchId,
+                    page,
+                    result.Count,
+                    total,
+                    url);
 
                 if (total <= 0)
                     break;
@@ -2769,25 +2780,52 @@ public class MagentoExporter : IMagentoExporter
 
                 if (!IsTransientMagentoStatus(response.StatusCode) || attempt == MagentoProductsMaxAttempts)
                     throw new HttpRequestException(
-                        $"Magento products page {page} failed with {(int)response.StatusCode} {response.ReasonPhrase}: {json}",
+                        $"Magento products page {page} failed with {(int)response.StatusCode} {response.ReasonPhrase}. Url: {url}. Body: {json}",
                         null,
                         response.StatusCode);
 
+                _logger.LogWarning(
+                    "Errore temporaneo chiamata prodotti Magento. Retry in corso. Page: {Page}; Attempt: {Attempt}/{MaxAttempts}; StatusCode: {StatusCode}; Reason: {Reason}; Url: {Url}; Body: {Body}",
+                    page,
+                    attempt,
+                    MagentoProductsMaxAttempts,
+                    (int)response.StatusCode,
+                    response.ReasonPhrase,
+                    url,
+                    json);
+
                 await DelayBeforeRetryAsync(response, attempt, token);
             }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested && attempt < MagentoProductsMaxAttempts)
+            catch (OperationCanceledException ex) when (!token.IsCancellationRequested && attempt < MagentoProductsMaxAttempts)
             {
+                _logger.LogWarning(
+                    ex,
+                    "Timeout chiamata prodotti Magento. Retry in corso. Page: {Page}; Attempt: {Attempt}/{MaxAttempts}; Url: {Url}",
+                    page,
+                    attempt,
+                    MagentoProductsMaxAttempts,
+                    url);
+
                 await DelayBeforeRetryAsync(null, attempt, token);
             }
             catch (HttpRequestException ex) when (
                 attempt < MagentoProductsMaxAttempts
                 && (!ex.StatusCode.HasValue || IsTransientMagentoStatus(ex.StatusCode.Value)))
             {
+                _logger.LogWarning(
+                    ex,
+                    "Errore HTTP chiamata prodotti Magento. Retry in corso. Page: {Page}; Attempt: {Attempt}/{MaxAttempts}; StatusCode: {StatusCode}; Url: {Url}",
+                    page,
+                    attempt,
+                    MagentoProductsMaxAttempts,
+                    ex.StatusCode,
+                    url);
+
                 await DelayBeforeRetryAsync(null, attempt, token);
             }
         }
 
-        throw new InvalidOperationException($"Magento products page {page} failed after {MagentoProductsMaxAttempts} attempts.");
+        throw new InvalidOperationException($"Magento products page {page} failed after {MagentoProductsMaxAttempts} attempts. Url: {url}");
     }
 
     private static bool IsTransientMagentoStatus(HttpStatusCode statusCode)

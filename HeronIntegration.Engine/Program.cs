@@ -1,5 +1,8 @@
 using HeronIntegration.Engine.DependencyInjection;
 using HeronIntegration.Engine.Workers;
+using Serilog;
+using Serilog.Debugging;
+using Serilog.Events;
 
 // Host dedicato ai processi background: qui devono vivere solo worker e servizi senza HTTP.
 var builder = Host.CreateApplicationBuilder(args);
@@ -9,10 +12,33 @@ builder.Services.AddWindowsService(options =>
     options.ServiceName = "Heron Integration Engine";
 });
 
-// Logging da servizio Windows/console: console e debug bastano per diagnostica locale e deploy base.
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
-builder.Logging.AddDebug();
+
+var logDirectory = @"C:\inetpub\wwwroot\logs";
+SelfLog.Enable(message =>
+{
+    try
+    {
+        File.AppendAllText(Path.Combine(logDirectory, "serilog-selflog.txt"), message);
+    }
+    catch
+    {
+        // Serilog self diagnostics must never block application startup.
+    }
+});
+
+Log.Logger = new LoggerConfiguration()
+    .Enrich.FromLogContext()
+    .MinimumLevel.Warning()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("System", LogEventLevel.Warning)
+    .WriteTo.File(
+        Path.Combine(logDirectory, "application-.txt"),
+        rollingInterval: RollingInterval.Day,
+        shared: true)
+    .CreateLogger();
+
+builder.Logging.AddSerilog(Log.Logger, dispose: true);
 
 // Registra repository, client esterni, processor e singleton condivisi con l'API.
 builder.Services.AddHeronIntegrationCore(builder.Configuration);

@@ -1,28 +1,47 @@
 using HeronIntegration.Engine.DependencyInjection;
 using Serilog;
+using Serilog.Debugging;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddHeronIntegrationCore(builder.Configuration);
 
+var logDirectory = @"C:\inetpub\wwwroot\logs";
+SelfLog.Enable(message =>
+{
+    try
+    {
+        File.AppendAllText(Path.Combine(logDirectory, "serilog-selflog.txt"), message);
+    }
+    catch
+    {
+        // Serilog self diagnostics must never block application startup.
+    }
+});
+
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .MinimumLevel.Debug()
+    .MinimumLevel.Warning()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .MinimumLevel.Override("System", LogEventLevel.Warning)
     .WriteTo.Logger(lc => lc
         .Filter.ByExcluding(evt =>
             evt.Properties.TryGetValue("ImportType", out var value) &&
             value.ToString().Trim('"') == "Farmadati")
         .WriteTo.File(
-            @"C:\inetpub\wwwroot\logs\application-.txt",
-            rollingInterval: RollingInterval.Day))
+            Path.Combine(logDirectory, "application-.txt"),
+            rollingInterval: RollingInterval.Day,
+            shared: true))
     .WriteTo.Logger(lc => lc
         .Filter.ByIncludingOnly(evt =>
             evt.Properties.TryGetValue("ImportType", out var value) &&
             value.ToString().Trim('"') == "Farmadati")
         .WriteTo.File(
-            @"C:\inetpub\wwwroot\logs\farmadati-import-.txt",
-            rollingInterval: RollingInterval.Day))
+            Path.Combine(logDirectory, "farmadati-import-.txt"),
+            rollingInterval: RollingInterval.Day,
+            shared: true))
     .CreateLogger();
 
 builder.Host.UseSerilog();
