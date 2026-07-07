@@ -33,10 +33,12 @@ public interface IBatchRepository
     Task<List<BatchExecution>> GetTodayAsync(string? customerId);
     Task<List<BatchExecution>> GetTodayForCustomerAsync(string customerId);
     Task<List<BatchExecution>> GetAllPastBatchByCustomerId(string customerId);
+    Task<(List<BatchExecution> Items, long TotalCount)> GetPastBatchPageByCustomerId(string customerId, int pageIndex, int pageSize);
 
     Task<List<BatchExecution>> GetAllTodayClosed();
 
     Task<BatchDashboardItem> BuildBatchDashboard(BatchExecution batch);
+    Task<List<BatchDashboardItem>> BuildBatchDashboards(List<BatchExecution> batches);
 
     Task DeleteAsync(string id);
 

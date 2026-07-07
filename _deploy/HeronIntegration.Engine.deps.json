@@ -12,6 +12,7 @@
           "FluentFTP": "52.0.0",
           "HeronIntegration.Shared": "1.0.0",
           "Microsoft.Extensions.Hosting": "9.0.12",
+          "Microsoft.Extensions.Hosting.WindowsServices": "9.0.12",
           "Microsoft.Extensions.Http": "10.0.2",
           "MongoDB.Bson": "3.6.0",
           "MongoDB.Driver": "3.6.0",
@@ -303,6 +304,19 @@
           "lib/net9.0/Microsoft.Extensions.Hosting.Abstractions.dll": {
             "assemblyVersion": "10.0.0.0",
             "fileVersion": "10.0.25.52411"
+          }
+        }
+      },
+      "Microsoft.Extensions.Hosting.WindowsServices/9.0.12": {
+        "dependencies": {
+          "Microsoft.Extensions.Hosting": "9.0.12",
+          "Microsoft.Extensions.Logging.EventLog": "9.0.12",
+          "System.ServiceProcess.ServiceController": "9.0.12"
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Hosting.WindowsServices.dll": {
+            "assemblyVersion": "9.0.0.12",
+            "fileVersion": "9.0.1225.60609"
           }
         }
       },
@@ -956,6 +970,25 @@
           }
         }
       },
+      "System.ServiceProcess.ServiceController/9.0.12": {
+        "dependencies": {
+          "System.Diagnostics.EventLog": "9.0.12"
+        },
+        "runtime": {
+          "lib/net9.0/System.ServiceProcess.ServiceController.dll": {
+            "assemblyVersion": "9.0.0.12",
+            "fileVersion": "9.0.1225.60609"
+          }
+        },
+        "runtimeTargets": {
+          "runtimes/win/lib/net9.0/System.ServiceProcess.ServiceController.dll": {
+            "rid": "win",
+            "assetType": "runtime",
+            "assemblyVersion": "9.0.0.12",
+            "fileVersion": "9.0.1225.60609"
+          }
+        }
+      },
       "System.Text.Encodings.Web/10.0.0": {
         "runtime": {
           "lib/net9.0/System.Text.Encodings.Web.dll": {
@@ -1173,6 +1206,13 @@
       "sha512": "sha512-KrN6TGFwCwqOkLLk/idW/XtDQh+8In+CL9T4M1Dx+5ScsjTq4TlVbal8q532m82UYrMr6RiQJF2HvYCN0QwVsA==",
       "path": "microsoft.extensions.hosting.abstractions/10.0.0",
       "hashPath": "microsoft.extensions.hosting.abstractions.10.0.0.nupkg.sha512"
+    },
+    "Microsoft.Extensions.Hosting.WindowsServices/9.0.12": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-bvj+GcKNhn0x1j+nk78grRGbCJiQwTr1bbx46ExElDq2W9sqDHbxPSRygg73OmXaTGW8bvlhHFlkVRAWn0TBfQ==",
+      "path": "microsoft.extensions.hosting.windowsservices/9.0.12",
+      "hashPath": "microsoft.extensions.hosting.windowsservices.9.0.12.nupkg.sha512"
     },
     "Microsoft.Extensions.Http/10.0.2": {
       "type": "package",
@@ -1502,6 +1542,13 @@
       "sha512": "sha512-xlJ07FAUSDjPL/GhvVY1/KVPWn2ce056X4nHPwqAa5rkNLiNN5rqh6VcgMUoF6J7ckwhkVJ1vVx/K/47nyyR9g==",
       "path": "system.servicemodel.primitives/8.1.2",
       "hashPath": "system.servicemodel.primitives.8.1.2.nupkg.sha512"
+    },
+    "System.ServiceProcess.ServiceController/9.0.12": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-0leevR99faCWlWGF0YN72A/MrG+OvNNVbNFuY1V0yBJhXfG71QAUu7qGvBkaLTw0Sq35xIMZBIo+4qMW2CdD7A==",
+      "path": "system.serviceprocess.servicecontroller/9.0.12",
+      "hashPath": "system.serviceprocess.servicecontroller.9.0.12.nupkg.sha512"
     },
     "System.Text.Encodings.Web/10.0.0": {
       "type": "package",

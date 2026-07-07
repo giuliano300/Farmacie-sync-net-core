@@ -31,6 +31,26 @@ public class BatchReportRepository : IBatchReportRepository
             .FirstOrDefaultAsync();
     }
 
+    public async Task<Dictionary<string, BatchReport>> GetBatchesByBatchIdsAsync(IEnumerable<string> batchIds)
+    {
+        var ids = batchIds
+            .Distinct()
+            .ToList();
+
+        if (ids.Count == 0)
+            return new Dictionary<string, BatchReport>();
+
+        var reports = await _context.BatchReports
+            .Aggregate()
+            .Match(Builders<BatchReport>.Filter.In(x => x.BatchId, ids))
+            .SortByDescending(x => x.FinishedAt)
+            .Group(x => x.BatchId, x => x.First())
+            .ToListAsync();
+
+        return reports
+            .ToDictionary(x => x.BatchId);
+    }
+
     public async Task<BatchReport?> GetByIdAsync(string id)
     {
         return await _context.BatchReports

@@ -44,25 +44,24 @@ public class BatchReportController : ControllerBase
 
 
     [HttpGet("history")]
-    public async Task<List<CompleteBatchesItem>> GetHistory(string customerId)
+    public async Task<PagedResult<CompleteBatchesItem>> GetHistory(
+        string customerId,
+        int pageIndex = 0,
+        int pageSize = 10)
     {
-        var allPast = await _batchRepo.GetAllPastBatchByCustomerId(customerId);
+        pageIndex = Math.Max(0, pageIndex);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        pageIndex = Math.Min(pageIndex, int.MaxValue / pageSize);
 
-        var res = new List<CompleteBatchesItem>();
+        var page = await _batchRepo.GetPastBatchPageByCustomerId(customerId, pageIndex, pageSize);
 
-        foreach (var batch in allPast)
+        return new PagedResult<CompleteBatchesItem>
         {
-            var result = new CompleteBatchesItem();
-
-            var b = await _batchRepo.BuildBatchDashboard(batch);
-            result.Batch = b;
-            var r = await _batchRepoReport.GetBatchesAsync(batch.Id.ToString());
-            result.Report = r;
-
-            res.Add(result);
-        }
-
-        return res;
+            Items = await BuildCompleteBatchesAsync(page.Items),
+            TotalCount = page.TotalCount,
+            PageIndex = pageIndex,
+            PageSize = pageSize
+        };
     }
 
     [HttpGet("today")]
@@ -70,21 +69,31 @@ public class BatchReportController : ControllerBase
     {
         var allPast = await _batchRepo.GetAllTodayClosed();
 
-        var res = new List<CompleteBatchesItem>();
+        return await BuildCompleteBatchesAsync(allPast);
+    }
 
-        foreach (var batch in allPast)
-        {
-            var result = new CompleteBatchesItem();
+    private async Task<List<CompleteBatchesItem>> BuildCompleteBatchesAsync(List<BatchExecution> batches)
+    {
+        var batchIds = batches
+            .Select(x => x.Id.ToString())
+            .ToList();
 
-            var b = await _batchRepo.BuildBatchDashboard(batch);
-            result.Batch = b;
-            var r = await _batchRepoReport.GetBatchesAsync(batch.Id.ToString());
-            result.Report = r;
+        var reportsTask = _batchRepoReport.GetBatchesByBatchIdsAsync(batchIds);
+        var dashboardsTask = _batchRepo.BuildBatchDashboards(batches);
 
-            res.Add(result);
-        }
+        await Task.WhenAll(reportsTask, dashboardsTask);
 
-        return res;
+        var reportsByBatchId = reportsTask.Result;
+        var dashboardsByBatchId = dashboardsTask.Result
+            .ToDictionary(x => x.BatchId);
+
+        return batchIds
+            .Select(batchId => new CompleteBatchesItem
+            {
+                Batch = dashboardsByBatchId[batchId],
+                Report = reportsByBatchId.GetValueOrDefault(batchId)
+            })
+            .ToList();
     }
 
     [HttpDelete("{id}")]

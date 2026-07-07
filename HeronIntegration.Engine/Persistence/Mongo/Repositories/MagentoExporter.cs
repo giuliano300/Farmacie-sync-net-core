@@ -36,6 +36,8 @@ public class MagentoExporter : IMagentoExporter
     private readonly IImportToMagentoStatusRepository _importToMagento;
     private readonly IMongoDatabase _database;
     private const int MaxParallel = 20;
+    private const int MagentoProductsPageSize = 300;
+    private const int MagentoProductsMaxAttempts = 3;
 
     public MagentoExporter(
         HttpClient http,
@@ -52,7 +54,7 @@ public class MagentoExporter : IMagentoExporter
         _http = http;
         _imageStorage = imageStorage;
 
-        _http.Timeout = TimeSpan.FromMinutes(10);
+        _http.Timeout = TimeSpan.FromMinutes(30);
         _exportRepo = exportRepo;
         _magento = magento;
         _batchRepo = batchRepo;
@@ -2669,78 +2671,139 @@ public class MagentoExporter : IMagentoExporter
     public async Task<List<MagentoSlimProduct>> GetMagentoProductsSlimAsync(string batchId, CancellationToken token)
     {
         var result = new List<MagentoSlimProduct>();
-
-        int page = 1;
-        const int pageSize = 300;
-        int total;
-        var batch = await _batchRepo.GetByIdAsync(batchId);
+        var page = 1;
+        var total = 0;
         await _batchRepo.UpdateDownloadProducts(batchId, 0, 0);
 
-        try
+        do
         {
-            do
+            try
             {
                 token.ThrowIfCancellationRequested();
 
                 var url =
                     $"{BaseUrl}/rest/V1/products?" +
                     $"searchCriteria[currentPage]={page}&" +
-                    $"searchCriteria[pageSize]={pageSize}&" +
+                    $"searchCriteria[pageSize]={MagentoProductsPageSize}&" +
                     $"fields=items[sku,price,custom_attributes[attribute_code,value],extension_attributes[category_links[category_id]]],total_count";
 
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
-
-                using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,token);
-                var json = await response.Content.ReadAsStringAsync(token);
-
-                if (!response.IsSuccessStatusCode)
-                    throw new Exception(json);
+                var json = await GetMagentoProductsPageJsonAsync(url, page, token);
 
                 var pageResult = System.Text.Json.JsonSerializer.Deserialize<ProductSearchResult>(json,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                if (pageResult!.Items == null)
+                if (pageResult?.Items == null || pageResult.Items.Count == 0)
                     break;
+
+                total = pageResult.TotalCount;
+
                 foreach (var item in pageResult.Items)
                 {
+                    if (string.IsNullOrWhiteSpace(item.Sku))
+                        continue;
+
                     var manufacturer = item.CustomAttributes?
-                        .FirstOrDefault(x => x.AttributeCode == "manufacturer")?.Value?.ToString();
+                        .FirstOrDefault(x => string.Equals(x.AttributeCode, "manufacturer", StringComparison.OrdinalIgnoreCase))
+                        ?.Value?.ToString();
 
                     var supplier = item.CustomAttributes?
-                        .FirstOrDefault(x => x.AttributeCode == "supplier")?.Value?.ToString();
+                        .FirstOrDefault(x => string.Equals(x.AttributeCode, "supplier", StringComparison.OrdinalIgnoreCase))
+                        ?.Value?.ToString();
 
                     var description = item.CustomAttributes?
-                        .FirstOrDefault(x => x.AttributeCode == "description")?.Value?.ToString();
+                        .FirstOrDefault(x => string.Equals(x.AttributeCode, "description", StringComparison.OrdinalIgnoreCase))
+                        ?.Value?.ToString();
 
-                    var cat = item!.CustomAttributes!.Where(a => a.AttributeCode.Contains("cat")).ToList();
-
-                   var Categories = ExtractCategories(item.ExtensionAttributes!);
+                    var categories = ExtractCategories(item.ExtensionAttributes);
 
                     result.Add(new MagentoSlimProduct
                     {
                         Sku = item.Sku,
                         Price = item.Price,
-                        Manufacturer = manufacturer!,
-                        Supplier = supplier!,
-                        Description = description!,
-                        Categories = Categories
+                        Manufacturer = manufacturer ?? string.Empty,
+                        Supplier = supplier ?? string.Empty,
+                        Description = description ?? string.Empty,
+                        Categories = categories
                     });
                 }
 
-                total = pageResult.TotalCount;
                 // Store Magento download progress on the batch.
                 await _batchRepo.UpdateDownloadProducts(batchId, total, result.Count);
 
                 page++;
-            } 
-                while ((page - 1) * pageSize < total);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch(Exception e)
             {
-                var ec = e;
+                await _batchRepo.UpdateDownloadProducts(batchId, total, result.Count);
+                Console.WriteLine($"Pagina prodotti Magento saltata batch {batchId}, pagina {page}, scaricati {result.Count}/{total}: {e}");
+
+                if (total <= 0)
+                    break;
+
+                page++;
             }
+        }
+        while ((page - 1) * MagentoProductsPageSize < total);
 
         return result;
+    }
+
+    private async Task<string> GetMagentoProductsPageJsonAsync(string url, int page, CancellationToken token)
+    {
+        for (var attempt = 1; attempt <= MagentoProductsMaxAttempts; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                var json = await response.Content.ReadAsStringAsync(token);
+
+                if (response.IsSuccessStatusCode)
+                    return json;
+
+                if (!IsTransientMagentoStatus(response.StatusCode) || attempt == MagentoProductsMaxAttempts)
+                    throw new HttpRequestException(
+                        $"Magento products page {page} failed with {(int)response.StatusCode} {response.ReasonPhrase}: {json}",
+                        null,
+                        response.StatusCode);
+
+                await DelayBeforeRetryAsync(response, attempt, token);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested && attempt < MagentoProductsMaxAttempts)
+            {
+                await DelayBeforeRetryAsync(null, attempt, token);
+            }
+            catch (HttpRequestException ex) when (
+                attempt < MagentoProductsMaxAttempts
+                && (!ex.StatusCode.HasValue || IsTransientMagentoStatus(ex.StatusCode.Value)))
+            {
+                await DelayBeforeRetryAsync(null, attempt, token);
+            }
+        }
+
+        throw new InvalidOperationException($"Magento products page {page} failed after {MagentoProductsMaxAttempts} attempts.");
+    }
+
+    private static bool IsTransientMagentoStatus(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.TooManyRequests
+           || statusCode == HttpStatusCode.RequestTimeout
+           || statusCode == HttpStatusCode.BadGateway
+           || statusCode == HttpStatusCode.ServiceUnavailable
+           || statusCode == HttpStatusCode.GatewayTimeout
+           || (int)statusCode >= 500;
+
+    private static async Task DelayBeforeRetryAsync(HttpResponseMessage? response, int attempt, CancellationToken token)
+    {
+        var retryAfter = response?.Headers.RetryAfter?.Delta;
+        var delay = retryAfter ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
+
+        await Task.Delay(delay, token);
     }
 
     public async Task DisableProductsAsync(List<string> skus, CancellationToken token)
@@ -3003,6 +3066,7 @@ public class MagentoExporter : IMagentoExporter
         await writer;
         await Task.WhenAll(consumers);
     }
+
     public List<CustomerMagentoCategories> FlattenCategoriesNodes(
     List<CategoryNode> nodes,
     string customerId,

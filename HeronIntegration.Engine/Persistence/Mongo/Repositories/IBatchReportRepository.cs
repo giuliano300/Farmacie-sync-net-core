@@ -10,6 +10,7 @@ public interface IBatchReportRepository
 
     Task<BatchReport> GetBatchesAsync(string batchId);
 
+    Task<Dictionary<string, BatchReport>> GetBatchesByBatchIdsAsync(IEnumerable<string> batchIds);
 
     Task<BatchReport?> GetByIdAsync(string id);
 }

@@ -96,6 +96,35 @@ public class BatchRepository : IBatchRepository
             .SortByDescending(x => x.StartedAt)
             .ToListAsync();
     }
+
+    public async Task<(List<BatchExecution> Items, long TotalCount)> GetPastBatchPageByCustomerId(
+        string customerId,
+        int pageIndex,
+        int pageSize)
+    {
+        var todayStart = DateTime.UtcNow.Date;
+        var filter = Builders<BatchExecution>.Filter.And(
+            Builders<BatchExecution>.Filter.Eq(x => x.CustomerId, customerId),
+            Builders<BatchExecution>.Filter.Or(
+                Builders<BatchExecution>.Filter.Lt(x => x.StartedAt, todayStart),
+                Builders<BatchExecution>.Filter.Eq(x => x.Status, BatchStatus.Closed)
+            )
+        );
+
+        var totalTask = _context.BatchExecutions
+            .CountDocumentsAsync(filter);
+
+        var itemsTask = _context.BatchExecutions
+            .Find(filter)
+            .SortByDescending(x => x.StartedAt)
+            .Skip(pageIndex * pageSize)
+            .Limit(pageSize)
+            .ToListAsync();
+
+        await Task.WhenAll(totalTask, itemsTask);
+
+        return (itemsTask.Result, totalTask.Result);
+    }
     public async Task<BatchExecution?> GetByIdAsync(string batchId)
     {
         return await _context.BatchExecutions
@@ -368,6 +397,130 @@ public class BatchRepository : IBatchRepository
 
         var magento =
             magentoTask.Result;
+
+        return CreateBatchDashboard(
+            batch,
+            steps,
+            rawTotal,
+            enrichedTotal,
+            resolvedTotal,
+            customer,
+            magento
+        );
+    }
+
+    public async Task<List<BatchDashboardItem>> BuildBatchDashboards(List<BatchExecution> batches)
+    {
+        if (batches.Count == 0)
+            return new List<BatchDashboardItem>();
+
+        var batchObjectIds = batches
+            .Select(x => x.Id)
+            .ToList();
+
+        var batchStringIds = batches
+            .Select(x => x.Id.ToString())
+            .ToList();
+
+        var customerIds = batches
+            .Select(x => x.CustomerId)
+            .Distinct()
+            .ToList();
+
+        var stepsTask = _context.StepExecutions
+            .Find(Builders<StepExecution>.Filter.In(x => x.BatchId, batchObjectIds))
+            .ToListAsync();
+
+        var rawCountsTask = CountByBatchAsync(_context.RawProducts, batchObjectIds);
+        var enrichedCountsTask = CountByBatchAsync(_context.EnrichedProducts, batchObjectIds);
+        var resolvedCountsTask = CountByBatchAsync(_context.ResolvedProducts, batchObjectIds);
+
+        var customersTask = _context.Customers
+            .Find(Builders<HeronIntegration.Shared.Entities.Customer>.Filter.In(x => x.Id, customerIds))
+            .ToListAsync();
+
+        var magentoTask = _context.ImportToMagentoStatus
+            .Find(Builders<HeronIntegration.Shared.Entities.ImportToMagentoStatus>.Filter.In(x => x.BatchId, batchStringIds))
+            .ToListAsync();
+
+        await Task.WhenAll(
+            stepsTask,
+            rawCountsTask,
+            enrichedCountsTask,
+            resolvedCountsTask,
+            customersTask,
+            magentoTask
+        );
+
+        var stepsByBatch = stepsTask.Result
+            .GroupBy(x => x.BatchId)
+            .ToDictionary(x => x.Key, x => x.ToList());
+
+        var rawCounts = rawCountsTask.Result;
+        var enrichedCounts = enrichedCountsTask.Result;
+        var resolvedCounts = resolvedCountsTask.Result;
+
+        var customersById = customersTask.Result
+            .ToDictionary(x => x.Id);
+
+        var magentoByBatchId = magentoTask.Result
+            .GroupBy(x => x.BatchId)
+            .ToDictionary(x => x.Key, x => x.First());
+
+        return batches
+            .Select(batch =>
+            {
+                stepsByBatch.TryGetValue(batch.Id, out var steps);
+                rawCounts.TryGetValue(batch.Id, out var rawTotal);
+                enrichedCounts.TryGetValue(batch.Id, out var enrichedTotal);
+                resolvedCounts.TryGetValue(batch.Id, out var resolvedTotal);
+                customersById.TryGetValue(batch.CustomerId, out var customer);
+                magentoByBatchId.TryGetValue(batch.Id.ToString(), out var magento);
+
+                return CreateBatchDashboard(
+                    batch,
+                    steps ?? new List<StepExecution>(),
+                    rawTotal,
+                    enrichedTotal,
+                    resolvedTotal,
+                    customer,
+                    magento
+                );
+            })
+            .ToList();
+    }
+
+    private static async Task<Dictionary<ObjectId, int>> CountByBatchAsync<T>(
+        IMongoCollection<T> collection,
+        List<ObjectId> batchIds)
+    {
+        var counts = await collection
+            .Aggregate()
+            .Match(Builders<T>.Filter.In("BatchId", batchIds))
+            .Group(new BsonDocument
+            {
+                { "_id", "$BatchId" },
+                { "count", new BsonDocument("$sum", 1) }
+            })
+            .ToListAsync();
+
+        return counts.ToDictionary(
+            x => x["_id"].AsObjectId,
+            x => x["count"].ToInt32()
+        );
+    }
+
+    private static BatchDashboardItem CreateBatchDashboard(
+        BatchExecution batch,
+        List<StepExecution> steps,
+        int rawTotal,
+        int enrichedTotal,
+        int resolvedTotal,
+        HeronIntegration.Shared.Entities.Customer? customer,
+        HeronIntegration.Shared.Entities.ImportToMagentoStatus? magento)
+    {
+        var batchId =
+            batch.Id.ToString();
 
         var currentStep =
             steps
