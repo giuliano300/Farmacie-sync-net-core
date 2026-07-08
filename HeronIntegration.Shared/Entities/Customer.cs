@@ -47,4 +47,8 @@ public class MagentoConfig
     public int? CronDelayMilliseconds { get; set; }
     public int? WebsiteId { get; set; }
     public int? AttributeSetId { get; set; }
+    public int? MaxConcurrentRequests { get; set; }
+    public int? RequestTimeoutSeconds { get; set; }
+    public int? MaxRetryAttempts { get; set; }
+    public int? RetryDelayMilliseconds { get; set; }
 }

@@ -78,7 +78,9 @@ public class BatchOrchestratorWorker : BackgroundService
         var magentoExporterFactory = scope.ServiceProvider.GetRequiredService<IMagentoExporterFactory>();
         var customerRepo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
 
-        var runningBatches = await batchRepo.GetRunningAsync();
+        var runningBatches = (await batchRepo.GetRunningAsync())
+            .Where(batch => string.Equals(batch.TriggeredBy, "CustomerCron", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         foreach (var batch in runningBatches)
         {
@@ -134,7 +136,9 @@ public class BatchOrchestratorWorker : BackgroundService
             if (processor == null)
                 throw new Exception($"Processor non trovato per step {step.Step}");
 
-            await processor.ExecuteAsync(step.BatchId.ToString(), token, batch.type);
+            var result = await processor.ExecuteAsync(step.BatchId.ToString(), token, batch.type);
+            if (!result.Success)
+                throw new Exception(result.ErrorMessage ?? $"Step {step.Step} non completato");
 
             await stepRepo.SetSuccessAsync(step.Id.ToString(), DateTime.UtcNow);
         }

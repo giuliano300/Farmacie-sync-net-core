@@ -8,6 +8,7 @@ using HeronIntegration.Shared.Models;
 using MongoDB.Driver;
 using MongoDB.Driver.GridFS;
 using Renci.SshNet;
+using Serilog.Context;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
@@ -36,9 +37,18 @@ public class MagentoExporter : IMagentoExporter
     private readonly IImportToMagentoStatusRepository _importToMagento;
     private readonly IMongoDatabase _database;
     private readonly ILogger<MagentoExporter> _logger;
+    private readonly SemaphoreSlim _magentoRequestGate;
+    private readonly int _magentoHttpMaxAttempts;
+    private readonly int _magentoHttpTimeoutSeconds;
+    private readonly int _magentoHttpRetryDelayMilliseconds;
     private const int MaxParallel = 20;
     private const int MagentoProductsPageSize = 300;
     private const int MagentoProductsMaxAttempts = 3;
+    private const int MagentoLogBodyMaxLength = 8000;
+    private const int DefaultMagentoMaxConcurrentRequests = 2;
+    private const int DefaultMagentoHttpMaxAttempts = 3;
+    private const int DefaultMagentoHttpTimeoutSeconds = 45;
+    private const int DefaultMagentoHttpRetryDelayMilliseconds = 3000;
 
     public MagentoExporter(
         HttpClient http,
@@ -56,7 +66,7 @@ public class MagentoExporter : IMagentoExporter
         _http = http;
         _imageStorage = imageStorage;
 
-        _http.Timeout = TimeSpan.FromMinutes(30);
+        _http.Timeout = Timeout.InfiniteTimeSpan;
         _exportRepo = exportRepo;
         _magento = magento;
         _batchRepo = batchRepo;
@@ -72,6 +82,11 @@ public class MagentoExporter : IMagentoExporter
         _importToMagento = importToMagento;
         _database = database;
         _logger = logger;
+        _magentoRequestGate = new SemaphoreSlim(
+            Math.Max(1, _magento.MaxConcurrentRequests ?? DefaultMagentoMaxConcurrentRequests));
+        _magentoHttpMaxAttempts = Math.Max(1, _magento.MaxRetryAttempts ?? DefaultMagentoHttpMaxAttempts);
+        _magentoHttpTimeoutSeconds = Math.Max(5, _magento.RequestTimeoutSeconds ?? DefaultMagentoHttpTimeoutSeconds);
+        _magentoHttpRetryDelayMilliseconds = Math.Max(0, _magento.RetryDelayMilliseconds ?? DefaultMagentoHttpRetryDelayMilliseconds);
 
         _gridFsBucket = new GridFSBucket(database);
     }
@@ -2309,7 +2324,7 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     private async Task SendAsync(HttpRequestMessage request, CancellationToken token)
         {
-            using var response = await _http.SendAsync(
+            using var response = await SendMagentoAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 token);
@@ -2320,6 +2335,266 @@ public class MagentoExporter : IMagentoExporter
                 throw new Exception(body);
             }
         }
+
+    private Task<HttpResponseMessage> SendMagentoAsync(
+        HttpRequestMessage request,
+        CancellationToken token)
+    {
+        return SendMagentoAsync(request, HttpCompletionOption.ResponseContentRead, token);
+    }
+
+    private async Task<HttpResponseMessage> SendMagentoAsync(
+        HttpRequestMessage request,
+        HttpCompletionOption completionOption,
+        CancellationToken token)
+    {
+        using var logScope = LogContext.PushProperty("LogArea", "MagentoExporter");
+
+        var method = request.Method.Method;
+        var url = request.RequestUri?.ToString();
+        var requestContent = await ReadContentBytesAsync(request.Content, token);
+        var requestBody = TruncateForLog(requestContent.Body);
+
+        _logger.LogInformation(
+            "Magento operation started. Method: {Method}; Url: {Url}; RequestBody: {RequestBody}",
+            method,
+            url,
+            requestBody);
+
+        for (var attempt = 1; attempt <= _magentoHttpMaxAttempts; attempt++)
+        {
+            var stopwatch = Stopwatch.StartNew();
+            await _magentoRequestGate.WaitAsync(token);
+
+            try
+            {
+                using var attemptTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                attemptTimeout.CancelAfter(TimeSpan.FromSeconds(_magentoHttpTimeoutSeconds));
+
+                using var attemptRequest = CloneRequest(request, requestContent);
+                var response = await _http.SendAsync(attemptRequest, completionOption, attemptTimeout.Token);
+                var responseBody = await ReadContentForLogAsync(response.Content, attemptTimeout.Token);
+                var cfRay = GetResponseHeader(response, "cf-ray");
+                var retryAfter = GetResponseHeader(response, "retry-after");
+                var server = string.Join(", ", response.Headers.Server.Select(value => value.ToString()));
+                var cloudflareBlockDetected = IsPossibleCloudflareBlock(response, cfRay, retryAfter);
+
+                stopwatch.Stop();
+
+                if (cloudflareBlockDetected)
+                {
+                    _logger.LogWarning(
+                        "Possible Cloudflare block or rate limit detected. Attempt: {Attempt}/{MaxAttempts}; Method: {Method}; Url: {Url}; StatusCode: {StatusCode}; Reason: {Reason}; CfRay: {CfRay}; RetryAfter: {RetryAfter}; Server: {Server}; DurationMs: {DurationMs}; ResponseBody: {ResponseBody}",
+                        attempt,
+                        _magentoHttpMaxAttempts,
+                        method,
+                        url,
+                        (int)response.StatusCode,
+                        response.ReasonPhrase,
+                        cfRay,
+                        retryAfter,
+                        server,
+                        stopwatch.ElapsedMilliseconds,
+                        responseBody);
+                }
+
+                _logger.LogInformation(
+                    "Magento operation completed. Attempt: {Attempt}/{MaxAttempts}; Method: {Method}; Url: {Url}; StatusCode: {StatusCode}; Reason: {Reason}; CfRay: {CfRay}; RetryAfter: {RetryAfter}; Server: {Server}; DurationMs: {DurationMs}; ResponseBody: {ResponseBody}",
+                    attempt,
+                    _magentoHttpMaxAttempts,
+                    method,
+                    url,
+                    (int)response.StatusCode,
+                    response.ReasonPhrase,
+                    cfRay,
+                    retryAfter,
+                    server,
+                    stopwatch.ElapsedMilliseconds,
+                    responseBody);
+
+                if (ShouldRetryMagentoResponse(response, cloudflareBlockDetected) && attempt < _magentoHttpMaxAttempts)
+                {
+                    await DelayMagentoRetryAsync(response, attempt, token);
+                    response.Dispose();
+                    continue;
+                }
+
+                return response;
+            }
+            catch (OperationCanceledException ex) when (!token.IsCancellationRequested && attempt < _magentoHttpMaxAttempts)
+            {
+                stopwatch.Stop();
+
+                _logger.LogWarning(
+                    ex,
+                    "Magento operation timed out. Retry in corso. Attempt: {Attempt}/{MaxAttempts}; Method: {Method}; Url: {Url}; TimeoutSeconds: {TimeoutSeconds}; DurationMs: {DurationMs}; RequestBody: {RequestBody}",
+                    attempt,
+                    _magentoHttpMaxAttempts,
+                    method,
+                    url,
+                    _magentoHttpTimeoutSeconds,
+                    stopwatch.ElapsedMilliseconds,
+                    requestBody);
+
+                await DelayMagentoRetryAsync(null, attempt, token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && attempt < _magentoHttpMaxAttempts)
+            {
+                stopwatch.Stop();
+
+                _logger.LogWarning(
+                    ex,
+                    "Magento operation failed. Retry in corso. Attempt: {Attempt}/{MaxAttempts}; Method: {Method}; Url: {Url}; DurationMs: {DurationMs}; RequestBody: {RequestBody}",
+                    attempt,
+                    _magentoHttpMaxAttempts,
+                    method,
+                    url,
+                    stopwatch.ElapsedMilliseconds,
+                    requestBody);
+
+                await DelayMagentoRetryAsync(null, attempt, token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                stopwatch.Stop();
+
+                _logger.LogError(
+                    ex,
+                    "Magento operation failed. Method: {Method}; Url: {Url}; DurationMs: {DurationMs}; RequestBody: {RequestBody}",
+                    method,
+                    url,
+                    stopwatch.ElapsedMilliseconds,
+                    requestBody);
+
+                throw;
+            }
+            finally
+            {
+                _magentoRequestGate.Release();
+            }
+        }
+
+        throw new InvalidOperationException($"Magento operation failed after {_magentoHttpMaxAttempts} attempts. Method: {method}; Url: {url}");
+    }
+
+    private static async Task<string?> ReadContentForLogAsync(HttpContent? content, CancellationToken token)
+    {
+        if (content == null)
+            return null;
+
+        return TruncateForLog(await content.ReadAsStringAsync(token));
+    }
+
+    private static string? TruncateForLog(string? body)
+    {
+        if (body == null)
+            return null;
+
+        if (body.Length <= MagentoLogBodyMaxLength)
+            return body;
+
+        return body[..MagentoLogBodyMaxLength] + "... [truncated]";
+    }
+
+    private static bool IsPossibleCloudflareBlock(
+        HttpResponseMessage response,
+        string? cfRay,
+        string? retryAfter)
+    {
+        if (string.IsNullOrWhiteSpace(cfRay))
+            return false;
+
+        return
+            response.StatusCode == HttpStatusCode.Forbidden ||
+            response.StatusCode == HttpStatusCode.TooManyRequests ||
+            response.StatusCode == HttpStatusCode.ServiceUnavailable ||
+            !string.IsNullOrWhiteSpace(retryAfter);
+    }
+
+    private static string? GetResponseHeader(HttpResponseMessage response, string headerName)
+    {
+        if (response.Headers.TryGetValues(headerName, out var values) ||
+            response.Content.Headers.TryGetValues(headerName, out values))
+        {
+            return string.Join(", ", values);
+        }
+
+        return null;
+    }
+
+    private static async Task<RequestContentSnapshot> ReadContentBytesAsync(HttpContent? content, CancellationToken token)
+    {
+        if (content == null)
+            return new RequestContentSnapshot(null, null, []);
+
+        var bytes = await content.ReadAsByteArrayAsync(token);
+        var body = Encoding.UTF8.GetString(bytes);
+        var headers = content.Headers
+            .Select(header => new KeyValuePair<string, IEnumerable<string>>(header.Key, header.Value.ToArray()))
+            .ToList();
+
+        return new RequestContentSnapshot(bytes, body, headers);
+    }
+
+    private static HttpRequestMessage CloneRequest(
+        HttpRequestMessage request,
+        RequestContentSnapshot content)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri)
+        {
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy
+        };
+
+        foreach (var header in request.Headers)
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+
+        foreach (var option in request.Options)
+            clone.Options.TryAdd(option.Key, option.Value);
+
+        if (content.Bytes != null)
+        {
+            clone.Content = new ByteArrayContent(content.Bytes);
+
+            foreach (var header in content.Headers)
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return clone;
+    }
+
+    private bool ShouldRetryMagentoResponse(
+        HttpResponseMessage response,
+        bool cloudflareBlockDetected)
+    {
+        return
+            cloudflareBlockDetected ||
+            response.StatusCode == HttpStatusCode.RequestTimeout ||
+            (int)response.StatusCode == 425 ||
+            response.StatusCode == HttpStatusCode.TooManyRequests ||
+            response.StatusCode == HttpStatusCode.BadGateway ||
+            response.StatusCode == HttpStatusCode.ServiceUnavailable ||
+            response.StatusCode == HttpStatusCode.GatewayTimeout;
+    }
+
+    private async Task DelayMagentoRetryAsync(HttpResponseMessage? response, int attempt, CancellationToken token)
+    {
+        var retryAfter = response?.Headers.RetryAfter?.Delta;
+        var delay = retryAfter ?? TimeSpan.FromMilliseconds(_magentoHttpRetryDelayMilliseconds * attempt);
+
+        _logger.LogInformation(
+            "Magento retry delay. Attempt: {Attempt}/{MaxAttempts}; DelayMs: {DelayMs}",
+            attempt,
+            _magentoHttpMaxAttempts,
+            delay.TotalMilliseconds);
+
+        await Task.Delay(delay, token);
+    }
+
+    private sealed record RequestContentSnapshot(
+        byte[]? Bytes,
+        string? Body,
+        List<KeyValuePair<string, IEnumerable<string>>> Headers);
 
     private async Task<HttpResponseMessage> PostHeronAsync(
         string route,
@@ -2334,7 +2609,7 @@ public class MagentoExporter : IMagentoExporter
 
         request.Content = content;
 
-        return await _http.SendAsync(
+        return await SendMagentoAsync(
             request,
             token
         );
@@ -2351,7 +2626,7 @@ public class MagentoExporter : IMagentoExporter
             );
 
         using var response =
-            await _http.SendAsync(
+            await SendMagentoAsync(
                 request,
                 token
             );
@@ -2514,7 +2789,7 @@ public class MagentoExporter : IMagentoExporter
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
 
-        var response = await _http.SendAsync(request, token);
+        var response = await SendMagentoAsync(request, token);
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -2538,7 +2813,7 @@ public class MagentoExporter : IMagentoExporter
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
 
-        var response = await _http.SendAsync(request, token);
+        var response = await SendMagentoAsync(request, token);
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -2560,7 +2835,7 @@ public class MagentoExporter : IMagentoExporter
             $"{BaseUrl}/rest/V1/categories"
         );
 
-        var response = await _http.SendAsync(request, token);
+        var response = await SendMagentoAsync(request, token);
         var json = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -2584,7 +2859,7 @@ public class MagentoExporter : IMagentoExporter
             $"{BaseUrl}/rest/V1/categories"
         );
 
-        var response = await _http.SendAsync(request, token);
+        var response = await SendMagentoAsync(request, token);
         var json = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
@@ -2772,7 +3047,7 @@ public class MagentoExporter : IMagentoExporter
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                using var response = await SendMagentoAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
                 var json = await response.Content.ReadAsStringAsync(token);
 
                 if (response.IsSuccessStatusCode)
@@ -2951,7 +3226,7 @@ public class MagentoExporter : IMagentoExporter
             "application/json"
         );
 
-        var response = await _http.SendAsync(request, token);
+        var response = await SendMagentoAsync(request, token);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -2967,7 +3242,7 @@ public class MagentoExporter : IMagentoExporter
             $"{BaseUrl}/rest/V1/products/{sku}/media"
         );
 
-        var response = await _http.SendAsync(getRequest, token);
+        var response = await SendMagentoAsync(getRequest, token);
 
         var content = await response.Content.ReadAsStringAsync();
 

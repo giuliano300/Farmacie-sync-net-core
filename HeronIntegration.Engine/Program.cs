@@ -14,7 +14,7 @@ builder.Services.AddWindowsService(options =>
 
 builder.Logging.ClearProviders();
 
-var logDirectory = @"C:\inetpub\wwwroot\logs";
+var logDirectory = ResolveLogDirectory(builder.Configuration);
 SelfLog.Enable(message =>
 {
     try
@@ -29,13 +29,25 @@ SelfLog.Enable(message =>
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .MinimumLevel.Warning()
+    .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
-    .WriteTo.File(
-        Path.Combine(logDirectory, "application-.txt"),
-        rollingInterval: RollingInterval.Day,
-        shared: true)
+    .WriteTo.Logger(lc => lc
+        .Filter.ByExcluding(evt =>
+            evt.Properties.TryGetValue("LogArea", out var value) &&
+            value.ToString().Trim('"') == "MagentoExporter")
+        .WriteTo.File(
+            Path.Combine(logDirectory, "application-.txt"),
+            rollingInterval: RollingInterval.Day,
+            shared: true))
+    .WriteTo.Logger(lc => lc
+        .Filter.ByIncludingOnly(evt =>
+            evt.Properties.TryGetValue("LogArea", out var value) &&
+            value.ToString().Trim('"') == "MagentoExporter")
+        .WriteTo.File(
+            Path.Combine(logDirectory, "magento-exporter-.txt"),
+            rollingInterval: RollingInterval.Day,
+            shared: true))
     .CreateLogger();
 
 builder.Logging.AddSerilog(Log.Logger, dispose: true);
@@ -55,3 +67,23 @@ builder.Services.AddHostedService<NightBatchFinalizerService>();
 // Avvio long-running: i worker restano attivi fino allo stop del processo/servizio.
 var host = builder.Build();
 host.Run();
+
+static string ResolveLogDirectory(IConfiguration configuration)
+{
+    var configuredDirectory =
+        Environment.GetEnvironmentVariable("HERON_LOG_DIR") ??
+        configuration["HeronLogging:LogDirectory"] ??
+        @"C:\inetpub\wwwroot\logs";
+
+    try
+    {
+        Directory.CreateDirectory(configuredDirectory);
+        return configuredDirectory;
+    }
+    catch
+    {
+        var fallbackDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+        Directory.CreateDirectory(fallbackDirectory);
+        return fallbackDirectory;
+    }
+}

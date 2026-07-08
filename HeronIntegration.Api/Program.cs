@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddHeronIntegrationCore(builder.Configuration);
 
-var logDirectory = @"C:\inetpub\wwwroot\logs";
+var logDirectory = ResolveLogDirectory(builder.Configuration);
 SelfLog.Enable(message =>
 {
     try
@@ -23,13 +23,15 @@ SelfLog.Enable(message =>
 
 Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
-    .MinimumLevel.Warning()
+    .MinimumLevel.Information()
     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
     .MinimumLevel.Override("System", LogEventLevel.Warning)
     .WriteTo.Logger(lc => lc
         .Filter.ByExcluding(evt =>
-            evt.Properties.TryGetValue("ImportType", out var value) &&
-            value.ToString().Trim('"') == "Farmadati")
+            (evt.Properties.TryGetValue("ImportType", out var importType) &&
+             importType.ToString().Trim('"') == "Farmadati") ||
+            (evt.Properties.TryGetValue("LogArea", out var logArea) &&
+             logArea.ToString().Trim('"') == "MagentoExporter"))
         .WriteTo.File(
             Path.Combine(logDirectory, "application-.txt"),
             rollingInterval: RollingInterval.Day,
@@ -40,6 +42,14 @@ Log.Logger = new LoggerConfiguration()
             value.ToString().Trim('"') == "Farmadati")
         .WriteTo.File(
             Path.Combine(logDirectory, "farmadati-import-.txt"),
+            rollingInterval: RollingInterval.Day,
+            shared: true))
+    .WriteTo.Logger(lc => lc
+        .Filter.ByIncludingOnly(evt =>
+            evt.Properties.TryGetValue("LogArea", out var value) &&
+            value.ToString().Trim('"') == "MagentoExporter")
+        .WriteTo.File(
+            Path.Combine(logDirectory, "magento-exporter-.txt"),
             rollingInterval: RollingInterval.Day,
             shared: true))
     .CreateLogger();
@@ -64,3 +74,23 @@ app.UseCors("OpenCors");
 app.MapControllers();
 
 app.Run();
+
+static string ResolveLogDirectory(IConfiguration configuration)
+{
+    var configuredDirectory =
+        Environment.GetEnvironmentVariable("HERON_LOG_DIR") ??
+        configuration["HeronLogging:LogDirectory"] ??
+        @"C:\inetpub\wwwroot\logs";
+
+    try
+    {
+        Directory.CreateDirectory(configuredDirectory);
+        return configuredDirectory;
+    }
+    catch
+    {
+        var fallbackDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+        Directory.CreateDirectory(fallbackDirectory);
+        return fallbackDirectory;
+    }
+}
