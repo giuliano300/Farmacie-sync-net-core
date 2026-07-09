@@ -1851,13 +1851,13 @@ public class MagentoExporter : IMagentoExporter
             | TEMP ROOT
             |--------------------------------------------------------------------------
             */
-            var root = _env.ContentRootPath;
-            var parent = Directory.GetParent(root)!.FullName;
-
             var tempRoot = Path.Combine(
-                parent,
+                ResolveSharedRoot(),
                 "temp-zip"
             );
+
+            DebugZip(
+                $"IMPORT IMAGES START -> ContentRoot:{_env.ContentRootPath}; TempRoot:{tempRoot}");
 
             if (!Directory.Exists(tempRoot))
             {
@@ -1874,6 +1874,9 @@ public class MagentoExporter : IMagentoExporter
                 Path.Combine(
                     tempRoot,
                     $"{batchId}.zip");
+
+            DebugZip(
+                $"IMPORT IMAGES ZIP PATH -> {zipPath}");
 
             /*
             |--------------------------------------------------------------------------
@@ -1935,7 +1938,9 @@ public class MagentoExporter : IMagentoExporter
         }
         catch(Exception e)
         {
-            Console.WriteLine(e.Message);
+            DebugZip(
+                $"IMPORT IMAGES FAILED -> ContentRoot:{_env.ContentRootPath}",
+                e);
             return null;
         }
     }
@@ -1959,6 +1964,9 @@ public class MagentoExporter : IMagentoExporter
         */
         var rootTemp = @"C:\TempZip";
 
+        DebugZip(
+            $"CREATE ZIP START -> Target:{zipPath}; StageRoot:{rootTemp}");
+
         if (!Directory.Exists(rootTemp))
             Directory.CreateDirectory(rootTemp);
 
@@ -1973,6 +1981,9 @@ public class MagentoExporter : IMagentoExporter
                 $"zip_{Guid.NewGuid():N}");
 
         Directory.CreateDirectory(tempFolder);
+
+        DebugZip(
+            $"CREATE ZIP STAGE FOLDER -> {tempFolder}");
 
         try
         {
@@ -1996,6 +2007,11 @@ public class MagentoExporter : IMagentoExporter
 
             DebugZip(
                 $"START GRIDFS -> TOTAL:{allImages.Count}");
+
+            if (!allImages.Any())
+            {
+                DebugZip("GRIDFS WARNING -> Nessuna immagine con GridFsId da inserire nello zip");
+            }
 
             /*
             |--------------------------------------------------------------------------
@@ -2032,7 +2048,9 @@ public class MagentoExporter : IMagentoExporter
                     }
                     catch (Exception ex)
                     {
-                        DebugZip($"GRIDFS ERROR -> {ex.Message}");
+                        DebugZip(
+                            $"GRIDFS ERROR -> AIC:{x.Product.Aic}; GridFsId:{x.Image.GridFsId}",
+                            ex);
                     }
                 });
 
@@ -2092,9 +2110,28 @@ public class MagentoExporter : IMagentoExporter
             DebugZip(
                 $"7ZIP EXIT -> {process.ExitCode}");
 
+            if (!string.IsNullOrWhiteSpace(stdOut))
+            {
+                DebugZip(
+                    $"7ZIP STDOUT -> {stdOut.Trim()}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(stdErr))
+            {
+                DebugZip(
+                    $"7ZIP STDERR -> {stdErr.Trim()}");
+            }
+
             if (process.ExitCode != 0)
                 throw new Exception(
                     $"7ZIP ERROR -> {stdErr}");
+
+            if (!File.Exists(zipPath))
+            {
+                throw new FileNotFoundException(
+                    "7-Zip terminato senza creare il file zip atteso",
+                    zipPath);
+            }
 
             var finalSize =
                 new FileInfo(zipPath)
@@ -2136,6 +2173,8 @@ public class MagentoExporter : IMagentoExporter
             }
             catch
             {
+                DebugZip(
+                    $"TEMP CLEANUP FAILED -> {tempFolder}");
             }
         }
     }
@@ -3569,8 +3608,38 @@ public class MagentoExporter : IMagentoExporter
 
     private void DebugZip(string message)
     {
-        File.AppendAllText(
-            @"C:\temp\zip-debug.log",
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}{Environment.NewLine}");
+        DebugZip(message, null);
+    }
+
+    private void DebugZip(string message, Exception? exception)
+    {
+        using (LogContext.PushProperty("LogArea", "MagentoExporter"))
+        {
+            if (exception == null)
+                _logger.LogInformation("{Message}", message);
+            else
+                _logger.LogError(exception, "{Message}", message);
+        }
+
+        try
+        {
+            var logPath = Path.Combine(
+                ResolveSharedRoot(),
+                "temp-zip",
+                "zip-debug.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            File.AppendAllText(
+                logPath,
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
+    }
+
+    private string ResolveSharedRoot()
+    {
+        var root = _env.ContentRootPath;
+        return Directory.GetParent(root)?.FullName ?? root;
     }
 }
