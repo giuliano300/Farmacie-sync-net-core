@@ -542,13 +542,6 @@ public class MagentoExporter : IMagentoExporter
             )
         };
 
-            var pr = mapped.Where(a => a.macroGroup != null).ToList();
-           foreach(var o in pr)
-            {
-                if (o.macroGroup == "P")
-                    Console.WriteLine("ciao");
-            }
-
         var json =
             System.Text.Json.JsonSerializer.Serialize(request);
 
