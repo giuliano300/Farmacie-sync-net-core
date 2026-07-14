@@ -1,4 +1,5 @@
-﻿using MongoDB.Bson;
+using HeronIntegration.Shared.Models;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace HeronIntegration.Shared.Entities;
@@ -34,6 +35,7 @@ public class ResolvedProduct
     public decimal Weight { get; set; }
     public int Availability { get; set; }
     public int Vat { get; set; }
+    public bool Published { get; set; }
     public string? MacroGroup { get; set; }
 
     public string? SupplierCode { get; set; }
@@ -42,37 +44,11 @@ public class ResolvedProduct
 
     public DateTime ResolvedAt { get; set; }
 
-
     public static ResolvedProduct MapToResolved(
-    EnrichedProduct raw,
-    SupplierStock chosen,
-    ObjectId batchObjectId)
+        EnrichedProduct raw,
+        SupplierStock chosen,
+        ObjectId batchObjectId)
     {
-        return new ResolvedProduct
-        {
-            Id = ObjectId.GenerateNewId(),
-            BatchId = batchObjectId,
-            CustomerId = raw.CustomerId,
-            Category = raw.Category,
-            SubCategory = raw.SubCategory,
-            MagentoCategoryId = raw.MagentoCategoryId,
-            Producer = raw.Producer,
-            Aic = raw.Aic,
-            Name = raw.Name,
-            ShortDescription = raw.ShortDescription,
-            LongDescription = raw.LongDescription,
-            Atc = raw.Atc,
-            Source = raw.Source,
-            Price = chosen.Price,
-            OriginalPrice = raw.OriginalPrice,
-            Availability = chosen.Availability,
-            SupplierCode = chosen.SupplierCode,
-            Images = raw.Images,
-            Weight = raw.Weight,
-            Vat = raw.Vat,
-            MacroGroup = raw.MacroGroup,
-            ResolvedAt = DateTime.UtcNow
-        };
+        return ProductMapper.ToResolved(raw, chosen, batchObjectId);
     }
-
 }

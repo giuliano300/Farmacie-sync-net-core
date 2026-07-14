@@ -108,7 +108,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             }
 
             // Image import stages files on FTP and waits for the Magento custom API to finish.
-            if (type is TypeRun.ImportImmagini)
+            if (type is TypeRun.Completo or TypeRun.ImportImmagini)
             {
                 var productWithImages = mapped.Where(a => a.Images.Count > 0).ToList();
                 if(productWithImages.Count > 0)
@@ -167,25 +167,7 @@ public class MagentoExportStepProcessor : IStepProcessor
     private List<ResolvedProduct> MapProducts(List<ResolvedProduct> source)
     {
         // Create detached product instances so downstream phases can safely normalize values.
-        return source.Select(p => new ResolvedProduct
-        {
-            BatchId = p.BatchId,
-            Aic = p.Aic,
-            Name = p.Name,
-            Price = p.Price,
-            OriginalPrice = p.OriginalPrice,
-            Availability = p.Availability,
-            MagentoCategoryId = p.MagentoCategoryId,
-            LongDescription = p.LongDescription?.Trim(),
-            ShortDescription = p.ShortDescription?.Trim(),
-            SupplierCode = p.SupplierCode,
-            Producer = p.Producer,
-            SubCategory = p.SubCategory,
-            Weight = p.Weight,
-            Images = p.Images,
-            Vat = p.Vat,
-            MacroGroup = p.MacroGroup
-        }).ToList();
+        return source.Select(ProductMapper.NormalizeForExport).ToList();
     }
 
     private async Task<List<string>> HandleProductUpsert(
@@ -200,35 +182,9 @@ public class MagentoExportStepProcessor : IStepProcessor
         var magentoDict = metadata.magentoProducts!
             .ToDictionary(x => x.Sku, StringComparer.OrdinalIgnoreCase);
 
-        var mappedList = mapped.Select(p =>
-        {
-            // Magento expects option ids for manufacturer/supplier attributes, not display names.
-            return new ResolvedProduct
-            {
-                BatchId = p.BatchId,
-                Aic = p.Aic,
-                Name = p.Name,
-                Price = p.Price,
-                OriginalPrice = p.OriginalPrice,
-                Vat = p.Vat,
-                Availability = p.Availability,
-                LongDescription = p.LongDescription,
-                ShortDescription = p.ShortDescription,
-                SupplierCode = (!string.IsNullOrWhiteSpace(p.SupplierCode) &&
-                                metadata.suppliers!.TryGetValue(p.SupplierCode, out var supplierId))
-                                    ? supplierId.ToString()
-                                    : "0",
-                Producer = (!string.IsNullOrWhiteSpace(p.Producer) &&
-                            metadata.manufacturers!.TryGetValue(p.Producer, out var manufacturerId))
-                                    ? manufacturerId.ToString()
-                                    : "0",
-                SubCategory = p.SubCategory,
-                MagentoCategoryId = p.MagentoCategoryId,
-                Weight = p.Weight,
-                Images = p.Images,
-                MacroGroup = p.MacroGroup
-            };
-        }).ToList();
+        var mappedList = mapped
+            .Select(p => ProductMapper.NormalizeForMagentoMetadata(p, metadata))
+            .ToList();
 
         var toUpsert = new List<ResolvedProduct>();
         var toSkip = new List<ResolvedProduct>();

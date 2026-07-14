@@ -186,7 +186,8 @@ public class HeronImportStepProcessor : IStepProcessor
                     Category = p.Category,
                     SubCategory = p.SubCategory,
                     Weight = p.Weight,
-                    Vat = p.Vat
+                    Vat = p.Vat,
+                    Published = p.Published
                 });
 
                 exportRows.Add(new ExportExecution

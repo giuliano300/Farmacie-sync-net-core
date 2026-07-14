@@ -87,23 +87,9 @@ public class MagentoController : ControllerBase
 
                 token.ThrowIfCancellationRequested();
 
-                var mappedList = resolvedList.Select(p => new ResolvedProduct
-                {
-                    BatchId = p.BatchId,
-                    Aic = p.Aic,
-                    Name = p.Name,
-                    Price = p.Price,
-                    OriginalPrice = p.OriginalPrice,
-                    Vat = p.Vat,
-                    Availability = p.Availability,
-                    LongDescription = p.LongDescription,
-                    ShortDescription = p.ShortDescription,
-                    SupplierCode = p.SupplierCode,
-                    Producer = p.Producer,
-                    SubCategory = p.SubCategory,
-                    Images = p.Images,
-                    MacroGroup = p.MacroGroup
-                }).ToList();
+                var mappedList = resolvedList
+                    .Select(ProductMapper.CloneResolved)
+                    .ToList();
 
                 var mongoDict = mappedList.ToDictionary(x => x.Aic);
 

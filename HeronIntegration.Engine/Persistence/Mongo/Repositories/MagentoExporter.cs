@@ -153,6 +153,7 @@ public class MagentoExporter : IMagentoExporter
                         var result =
                             await UpsertProductCustomBulkAsync(
                                 chunk.ToList(),
+                                c.DisableProductsBelowQuantity,
                                 batchId,
                                 ct
                             );
@@ -526,13 +527,14 @@ public class MagentoExporter : IMagentoExporter
     private async Task<MagentoImportResponse?>
         UpsertProductCustomBulkAsync(
             List<ResolvedProduct> products,
+            int disableProductsBelowQuantity,
             string batchId,
             CancellationToken token)
     {
         try { 
         var mapped =
             products
-                .Select(MapMagentoProduct)
+                .Select(x => MapMagentoProduct(x, disableProductsBelowQuantity))
                 .ToList();
 
         var request = new
@@ -784,12 +786,19 @@ public class MagentoExporter : IMagentoExporter
     // 🔥 MAP PRODOTTO MAGENTO API CUSTOM
     // =====================================================
     private MagentoBulkProduct MapMagentoProduct(
-    ResolvedProduct x)
+    ResolvedProduct x,
+    int disableProductsBelowQuantity)
     {
         var specialPrice =
             x.OriginalPrice > x.Price
                 ? x.Price
                 : 0;
+
+        var status =
+            x.Published &&
+            x.Availability >= disableProductsBelowQuantity
+                ? 1
+                : 2;
 
         return new MagentoBulkProduct
         {
@@ -812,7 +821,7 @@ public class MagentoExporter : IMagentoExporter
 
             qty = x.Availability,
 
-            status = 1,
+            status = status,
 
             visibility = 4,
 

@@ -1,4 +1,5 @@
-﻿using MongoDB.Bson;
+using HeronIntegration.Shared.Models;
+using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 
 namespace HeronIntegration.Shared.Entities;
@@ -34,6 +35,7 @@ public class EnrichedProduct
     public decimal Weight { get; set; }
     public int HeronStock { get; set; }
     public int Vat { get; set; }
+    public bool Published { get; set; }
     public string? MacroGroup { get; set; }
 
     public List<ProductImage> Images { get; set; } = new();
@@ -43,71 +45,14 @@ public class EnrichedProduct
 
     public static EnrichedProduct CreateMinimal(RawProduct raw, string batchId)
     {
-        return new EnrichedProduct
-        {
-            BatchId = ObjectId.Parse(batchId),
-            CustomerId = raw.CustomerId,
-            Aic = raw.Aic,
-
-            Name = raw.Name!,
-            ShortDescription = raw.Name,
-            LongDescription = null,
-
-            Category = raw.Category,
-            SubCategory = raw.SubCategory,
-            Producer = raw.Producer,
-            MagentoCategoryId = raw.MagentoCategoryId,
-
-            Images = new List<ProductImage>(),
-
-            HeronPrice = raw.Price,
-            HeronStock = raw.Stock,
-
-            Weight = raw.Weight,
-
-            OriginalPrice = raw.OriginalPrice,
-
-            Vat = raw.Vat,
-            MacroGroup = null,
-
-            CachedAt = DateTime.UtcNow,
-
-            CreatedAt = DateTime.UtcNow
-        };
+        return ProductMapper.ToMinimalEnriched(raw, batchId);
     }
 
-        public static EnrichedProduct FromCache(
+    public static EnrichedProduct FromCache(
         RawProduct raw,
         FarmadatiCache cache,
         string batchId)
-        {
-            return new EnrichedProduct
-            {
-                Id = ObjectId.GenerateNewId(),
-                BatchId = ObjectId.Parse(batchId),
-                CustomerId = raw.CustomerId,
-                Aic = raw.Aic,
-
-                Name = cache.Name,
-                ShortDescription = cache.ShortDescription,
-                LongDescription = cache.LongDescription,
-
-                Category = raw.Category,
-                SubCategory = raw.SubCategory,
-                MagentoCategoryId = raw.MagentoCategoryId,
-                Producer = raw.Producer,
-
-                Vat = raw.Vat,
-                MacroGroup = cache.MacroGroup,
-
-                Images = cache.Images ?? new List<ProductImage>(),
-                HeronPrice = raw.Price,
-                OriginalPrice = raw.OriginalPrice,
-                HeronStock = raw.Stock,
-                CreatedAt = DateTime.UtcNow,
-                Weight = raw.Weight,
-                Source = "CACHE"
-            };
-        }
-
+    {
+        return ProductMapper.ToEnrichedFromCache(raw, cache, batchId);
+    }
 }
