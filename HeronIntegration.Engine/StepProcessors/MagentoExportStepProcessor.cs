@@ -108,7 +108,7 @@ public class MagentoExportStepProcessor : IStepProcessor
             }
 
             // Image import stages files on FTP and waits for the Magento custom API to finish.
-            if (type is TypeRun.Completo or TypeRun.ImportImmagini)
+            if (type is TypeRun.ImportImmagini)
             {
                 var productWithImages = mapped.Where(a => a.Images.Count > 0).ToList();
                 if(productWithImages.Count > 0)
