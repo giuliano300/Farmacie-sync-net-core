@@ -41,6 +41,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly int _magentoHttpMaxAttempts;
     private readonly int _magentoHttpTimeoutSeconds;
     private readonly int _magentoHttpRetryDelayMilliseconds;
+    private readonly int _imagePollingStallTimeoutMinutes;
     private const int MaxParallel = 20;
     private const int MagentoProductsPageSize = 300;
     private const int MagentoProductsMaxAttempts = 3;
@@ -49,6 +50,7 @@ public class MagentoExporter : IMagentoExporter
     private const int DefaultMagentoHttpMaxAttempts = 3;
     private const int DefaultMagentoHttpTimeoutSeconds = 45;
     private const int DefaultMagentoHttpRetryDelayMilliseconds = 3000;
+    private const int DefaultImagePollingStallTimeoutMinutes = 2;
 
     public MagentoExporter(
         HttpClient http,
@@ -87,6 +89,9 @@ public class MagentoExporter : IMagentoExporter
         _magentoHttpMaxAttempts = Math.Max(1, _magento.MaxRetryAttempts ?? DefaultMagentoHttpMaxAttempts);
         _magentoHttpTimeoutSeconds = Math.Max(5, _magento.RequestTimeoutSeconds ?? DefaultMagentoHttpTimeoutSeconds);
         _magentoHttpRetryDelayMilliseconds = Math.Max(0, _magento.RetryDelayMilliseconds ?? DefaultMagentoHttpRetryDelayMilliseconds);
+        _imagePollingStallTimeoutMinutes = Math.Max(
+            1,
+            _magento.ImagePollingStallTimeoutMinutes ?? DefaultImagePollingStallTimeoutMinutes);
 
         _gridFsBucket = new GridFSBucket(database);
     }
@@ -211,45 +216,45 @@ public class MagentoExporter : IMagentoExporter
             return;
         }
 
-        try
+        var consecutiveErrors = 0;
+
+        while (true)
         {
-            var request = new
+            try
             {
-                batchId = batchId,
-                skus = skus
-            };
+                var request = new
+                {
+                    batchId = batchId,
+                    skus = skus
+                };
 
-            var json =
-                System.Text.Json.JsonSerializer.Serialize(
-                    request
-                );
+                var json = JsonSerializer.Serialize(request);
 
-            using var content =
-                new StringContent(
+                using var content = new StringContent(
                     json,
                     Encoding.UTF8,
-                    "application/json"
-                );
+                    "application/json");
 
-            using var response =
-                await PostHeronAsync(
+                using var response = await PostHeronAsync(
                     "reindex",
                     content,
-                    token
-                );
+                    token);
 
-            var responseContent =
-                await response.Content
-                    .ReadAsStringAsync(token);
-
-            if (!response.IsSuccessStatusCode)
-            {
+                response.EnsureSuccessStatusCode();
                 return;
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(ex.Message);
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                consecutiveErrors++;
+                Console.WriteLine($"Avvio reindex fallito: {ex.Message}");
+
+                var retryDelaySeconds = Math.Min(30, Math.Max(2, consecutiveErrors * 2));
+                await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), token);
+            }
         }
     }
 
@@ -258,11 +263,8 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task WaitReindexAsync(string batchId, CancellationToken token)
     {
-        decimal? lastPercent = null;
-        DateTime lastChange = DateTime.UtcNow;
-        DateTime? firstErrorTime = null;
+        var consecutiveErrors = 0;
 
-        const int timeoutMinutes = 5;
         while (true)
         {
             try
@@ -271,84 +273,42 @@ public class MagentoExporter : IMagentoExporter
                     $"reindex-status/{batchId}",
                     token);
 
-                // Se la chiamata va a buon fine azzero il timer degli errori
-                firstErrorTime = null;
+                var result = DeserializeMagentoStatus<ReindexStatus>(response, "reindex");
 
-                var innerJson =
-                    System.Text.Json.JsonSerializer.Deserialize<string>(response);
+                await _importToMagento.UpdateImportStatusAsync(
+                    batchId,
+                    reindexPercent: result.Percent);
 
-                var result =
-                    System.Text.Json.JsonSerializer.Deserialize<ReindexStatus>(
-                        innerJson!,
-                        new JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        });
+                var reindexCompleted =
+                    !result.Running ||
+                    result.Percent >= 98 ||
+                    (result.Total > 0 && result.Processed >= result.Total);
 
-                if (result != null)
+                if (reindexCompleted)
                 {
-                    //Console.WriteLine($"{result.Percent}%");
-
-                    // Verifica se la percentuale è cambiata
-                    if (lastPercent == null || Math.Abs(lastPercent.Value - result.Percent) > 0.01m)
-                    {
-                        lastPercent = result.Percent;
-                        lastChange = DateTime.UtcNow;
-                    }
-                    else
-                    {
-                        // Se è ferma da troppo tempo
-                        if (DateTime.UtcNow - lastChange > TimeSpan.FromMinutes(timeoutMinutes))
-                        {
-                            Console.WriteLine(
-                                $"Reindex fermo al {result.Percent}% da oltre {timeoutMinutes} minuti. Forzo al 100%.");
-
-                            await _importToMagento.UpdateImportStatusAsync(
-                                batchId,
-                                reindexPercent: 100);
-
-                            break;
-                        }
-                    }
-
-                    // Aggiornamento normale
                     await _importToMagento.UpdateImportStatusAsync(
                         batchId,
-                        reindexPercent: result.Percent);
+                        reindexPercent: 100,
+                        reindexStatus: OperationsStatus.Ended);
 
-                    if (!result.Running || result.Percent >= 98)
-                    {
-                        await _importToMagento.UpdateImportStatusAsync(
-                            batchId,
-                            reindexPercent: 100);
-
-                        break;
-                    }
+                    break;
                 }
 
+                consecutiveErrors = 0;
+
                 await Task.Delay(5000, token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.Message);
+                consecutiveErrors++;
 
-                if (firstErrorTime == null)
-                {
-                    firstErrorTime = DateTime.UtcNow;
-                }
-
-                if (DateTime.UtcNow - firstErrorTime >
-                    TimeSpan.FromMinutes(timeoutMinutes))
-                {
-                    Console.WriteLine(
-                        $"Errore continuo da oltre {timeoutMinutes} minuti. Forzo il reindex al 100%.");
-
-                    await _importToMagento.UpdateImportStatusAsync(
-                        batchId,
-                        reindexPercent: 100);
-
-                    break;
-                }
+                var retryDelaySeconds = Math.Min(30, Math.Max(2, consecutiveErrors * 2));
+                await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), token);
             }
         }
 
@@ -358,11 +318,12 @@ public class MagentoExporter : IMagentoExporter
     // =====================================================
     public async Task WaitPollingImagesAsync(string batchId, CancellationToken token)
     {
-        DateTime lastChange = DateTime.UtcNow;
-        DateTime? firstErrorTime = null;
-
-        const int timeoutMinutes = 5;
-        int processedCount = 0;
+        var processedSkus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var consecutiveErrors = 0;
+        int? lastProcessed = null;
+        decimal? lastPercent = null;
+        var lastProgressAt = DateTime.UtcNow;
+        var importProgressStarted = false;
 
         while (true)
         {
@@ -374,25 +335,15 @@ public class MagentoExporter : IMagentoExporter
                     token
                 );
 
-                // Se la chiamata va a buon fine azzero il timer degli errori
-                firstErrorTime = null;
+                var result = DeserializeImagesImportStatus(response);
 
-                var innerJson =
-                    System.Text.Json.JsonSerializer.Deserialize<string>(response);
-
-                var result =
-                    System.Text.Json.JsonSerializer.Deserialize<ImagesImportStatus>(
-                        innerJson!,
-                        new JsonSerializerOptions
-                        {
-                            PropertyNameCaseInsensitive = true
-                        }
-                    );
-
-                var allSkus = result!.Inserted;
-
-                var newSkus = allSkus.Skip(processedCount).ToList();
-                processedCount = allSkus.Count;
+                // Magento può omettere "inserted" finché non ha completato la
+                // prima immagine. Un set evita inoltre doppi conteggi se la lista
+                // restituita dall'API cambia ordine tra due chiamate.
+                var newSkus = (result.Inserted ?? [])
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Where(s => !processedSkus.Contains(s))
+                    .ToList();
 
                 if (newSkus.Count > 0)
                 {
@@ -415,49 +366,113 @@ public class MagentoExporter : IMagentoExporter
 
                     // Update image import progress with newly confirmed SKUs.
                     await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesInserted: l.Count);
+
+                    // Uno SKU diventa processato soltanto dopo che entrambi gli
+                    // aggiornamenti locali sono riusciti, così verrà ritentato in
+                    // caso di errore temporaneo del database.
+                    processedSkus.UnionWith(newSkus);
                 }
 
 
-                if (result != null)
-                {
-                    Console.WriteLine(
-                        $"{result.Percent}%"
-                    );
+                Console.WriteLine(
+                    $"{result.Percent}%"
+                );
 
-                    if (!result.Running)
+                var hasImportProgress =
+                    result.Processed > 0 ||
+                    result.Percent > 0;
+
+                var progressChanged =
+                    lastProcessed != result.Processed ||
+                    lastPercent != result.Percent;
+
+                if (progressChanged)
+                {
+                    lastProcessed = result.Processed;
+                    lastPercent = result.Percent;
+
+                    if (hasImportProgress)
                     {
-                        // Mark image import as completed when Magento reports no running work.
-                        await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
-                        break;
+                        importProgressStarted = true;
+                        lastProgressAt = DateTime.UtcNow;
                     }
                 }
+                else if (
+                    importProgressStarted &&
+                    result.Running &&
+                    DateTime.UtcNow - lastProgressAt >= TimeSpan.FromMinutes(
+                        _imagePollingStallTimeoutMinutes))
+                {
+                    Console.WriteLine(
+                        $"Import immagini fermo a {result.Processed}/{result.Total} " +
+                        $"({result.Percent}%) da almeno {_imagePollingStallTimeoutMinutes} minuti. " +
+                        "Imposto Running=false e proseguo con il reindex.");
+
+                    // Running viene forzato solo nella copia locale dello stato: il
+                    // workflow Heron termina la fase e può passare al reindex.
+                    result.Running = false;
+                }
+
+                var imagesCompleted =
+                    !result.Running ||
+                    result.Percent >= 100 ||
+                    (result.Total > 0 && result.Processed >= result.Total);
+
+                if (imagesCompleted)
+                {
+                    // Alcune versioni dell'endpoint lasciano Running=true anche a
+                    // lavoro concluso. Percentuale e contatori sono segnali di
+                    // completamento equivalenti e permettono di avviare il reindex.
+                    await _importToMagento.UpdateImportStatusAsync(
+                        batchId,
+                        insertImagesStatus: OperationsStatus.Ended);
+                    break;
+                }
+
+                consecutiveErrors = 0;
 
                 await Task.Delay(
                     2000,
                     token
                 );
             }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.Message);
+                consecutiveErrors++;
 
-                if (firstErrorTime == null)
-                {
-                    firstErrorTime = DateTime.UtcNow;
-                }
-
-                if (DateTime.UtcNow - firstErrorTime >
-                    TimeSpan.FromMinutes(timeoutMinutes))
-                {
-                    Console.WriteLine(
-                        $"Errore continuo da oltre {timeoutMinutes} minuti. Forzo il reindex al 100%.");
-
-                    await _importToMagento.UpdateImportStatusAsync(batchId, insertImagesStatus: OperationsStatus.Ended);
-
-                    break;
-                }
+                // Il polling non viene mai terminato per errori temporanei. Il
+                // backoff è limitato a 30 secondi, poi il controllo riprende.
+                var retryDelaySeconds = Math.Min(30, Math.Max(2, consecutiveErrors * 2));
+                await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), token);
             }
         }
+    }
+
+    private static ImagesImportStatus DeserializeImagesImportStatus(string response)
+        => DeserializeMagentoStatus<ImagesImportStatus>(response, "immagini");
+
+    private static T DeserializeMagentoStatus<T>(string response, string operation)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+            throw new JsonException($"La risposta dello stato {operation} è vuota.");
+
+        using var document = JsonDocument.Parse(response);
+        var json = document.RootElement.ValueKind == JsonValueKind.String
+            ? document.RootElement.GetString()
+            : document.RootElement.GetRawText();
+
+        if (string.IsNullOrWhiteSpace(json))
+            throw new JsonException($"La risposta dello stato {operation} non contiene dati.");
+
+        return JsonSerializer.Deserialize<T>(
+                   json,
+                   new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+               ?? throw new JsonException($"Impossibile deserializzare lo stato {operation}.");
     }
 
     // =====================================================
@@ -539,6 +554,7 @@ public class MagentoExporter : IMagentoExporter
 
         var request = new
         {
+            batchId,
             products = System.Text.Json.JsonSerializer.Serialize(
                 mapped
             )

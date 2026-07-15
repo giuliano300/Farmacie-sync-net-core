@@ -136,6 +136,14 @@ public class MagentoExportStepProcessor : IStepProcessor
 
                 await exporter.ReindexAsync(skus, batchId, token);
                 await exporter.WaitReindexAsync(batchId, token);
+
+                // Il frontend deve vedere il reindex concluso anche se una pulizia
+                // cache o la finalizzazione successiva dovessero fallire.
+                await _importToMagento.UpdateImportStatusAsync(
+                    batchId,
+                    reindexPercent: 100,
+                    reindexStatus: OperationsStatus.Ended);
+
                 await exporter.CleanIndex(token);
                 await exporter.CleanCache(token);
             }

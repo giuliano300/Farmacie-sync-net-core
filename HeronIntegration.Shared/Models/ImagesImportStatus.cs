@@ -16,7 +16,7 @@ namespace HeronIntegration.Shared.Models
 
         public decimal Percent { get; set; }
 
-        public List<string> Inserted { get; set; }
-        public List<string> Errors { get; set; }
+        public List<string> Inserted { get; set; } = new();
+        public List<string> Errors { get; set; } = new();
     }
 }
