@@ -78,28 +78,40 @@ public class BatchOrchestratorWorker : BackgroundService
         var magentoExporterFactory = scope.ServiceProvider.GetRequiredService<IMagentoExporterFactory>();
         var customerRepo = scope.ServiceProvider.GetRequiredService<ICustomerRepository>();
 
-        var runningBatches = (await batchRepo.GetRunningAsync())
-            .Where(batch => string.Equals(batch.TriggeredBy, "CustomerCron", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        // MongoDB is the durable queue for both scheduled and manually requested batches.
+        // Long-running work must never live in an IIS request/background task.
+        var runningBatches = await batchRepo.GetRunningAsync();
 
         foreach (var batch in runningBatches)
         {
             // Batch-level isolation: one broken batch does not block the rest of the queue.
             try
             {
-                var nextStep = await stepRepo.GetNextPendingStepAsync(batch.Id.ToString());
+                var batchId = batch.Id.ToString();
+                var runningStep = (await stepRepo.GetByBatchAsync(batchId))
+                    .FirstOrDefault(x => x.Status == StepStatus.Running);
+                var nextStep = runningStep
+                    ?? await stepRepo.GetNextPendingStepAsync(batchId);
 
                 if (nextStep == null)
                 {
                     // No pending steps means the import/export pipeline has completed and can be closed.
                     await FinalizeBatch(
-                        batch.Id.ToString(),
+                        batchId,
                         batchRepo,
                         customerRepo,
                         magentoExporterFactory,
                         batchFinalizer,
                         token);
                     continue;
+                }
+
+                if (runningStep != null)
+                {
+                    _logger.LogWarning(
+                        "Ripresa step {Step} rimasto Running per batch {BatchId}",
+                        runningStep.Step,
+                        batchId);
                 }
 
                 await ExecuteStep(batch, nextStep, stepRepo, processors);

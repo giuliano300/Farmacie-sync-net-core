@@ -21,6 +21,7 @@ public interface IBatchRepository
     Task<BatchExecution?> GetByIdAsync(string batchId);
 
     Task SetRunningAsync(string batchId);
+    Task SetTypeAsync(string batchId, HeronIntegration.Shared.Enums.TypeRun? type);
 
     Task<bool> CanStartNextStepAsync(string batchId);
     Task UpdateDownloadProducts(string batchId, int totalMagentoProducts, int totalDownloadMagentoProducts);

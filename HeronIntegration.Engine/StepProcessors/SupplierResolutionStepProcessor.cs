@@ -70,13 +70,17 @@ public class SupplierResolutionStepProcessor : IStepProcessor
             // One bulk query avoids an N+1 lookup per product.
             var supplierStocks = await _supplierRepo.GetByAicsAsync(aics);
 
-            // Select the cheapest supplier that has stock for each AIC.
+            // Supplier data is used only for availability: prefer the supplier
+            // with the highest stock and never use its price for Magento.
             var bestSupplierByAic = supplierStocks
                 .Where(a=>a.Availability > 0)
                 .GroupBy(x => x.Aic)
                 .ToDictionary(
                     g => g.Key,
-                    g => g.OrderBy(x => x.Price).First()
+                    g => g
+                        .OrderByDescending(x => x.Availability)
+                        .ThenBy(x => x.SupplierCode)
+                        .First()
                 );
 
             var resolvedList = new List<ResolvedProduct>(raws.Count);
@@ -93,8 +97,17 @@ public class SupplierResolutionStepProcessor : IStepProcessor
                 };
 
                 // Alternative suppliers are used only when Heron has no availability.
+                // Keep the Heron price: suppliers contribute stock only.
                 if (bestSupplierByAic.TryGetValue(raw.Aic, out var best) && chosen.Availability == 0)
-                       chosen = best;
+                {
+                    chosen = new SupplierStock
+                    {
+                        SupplierCode = best.SupplierCode,
+                        Aic = raw.Aic,
+                        Price = raw.HeronPrice,
+                        Availability = best.Availability
+                    };
+                }
 
                 resolvedList.Add(ResolvedProduct.MapToResolved(raw, chosen, batchObjectId));
             }

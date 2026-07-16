@@ -118,25 +118,7 @@ public class BatchController : ControllerBase
     {
         try
         {
-            var token = _processManager.Start(ProcessType.Batch,batchId);
-
             await _stepRepo.ResetStepsAsync(batchId);
-            var step = await _stepRepo.GetByIdAsync(stepId);
-            switch (step!.Step.ToUpper())
-            {
-                case "HERONIMPORT":
-                    await _heronProcessor.ExecuteAsync(batchId, token);
-                    break;
-                case "FARMADATI":
-                    await _farmadatiProcessor.ExecuteAsync(batchId, token);
-                    break;
-                case "SUPPLIERS":
-                    await _supplierProcessor.ExecuteAsync(batchId, token);
-                    break;
-                case "MAGENTO":
-                    await _magentoProcessor.ExecuteAsync(batchId, token);
-                    break;
-            }
             await _batchRepo.SetRunningAsync(batchId);
             return true;
         }
@@ -153,10 +135,7 @@ public class BatchController : ControllerBase
     {
         try
         {
-            var token = _processManager.Start(ProcessType.Batch, batchId);
-
             await _batchRepo.SetRunningAsync(batchId);
-            await _heronProcessor.ExecuteAsync(batchId, token);
             return true;
         }
         catch

@@ -219,6 +219,13 @@ public class BatchRepository : IBatchRepository
         );
     }
 
+    public async Task SetTypeAsync(string batchId, TypeRun? type)
+    {
+        await _context.BatchExecutions.UpdateOneAsync(
+            x => x.Id == ObjectId.Parse(batchId),
+            Builders<BatchExecution>.Update.Set(x => x.type, type));
+    }
+
     public async Task<StepExecution?> GetCurrentStepAsync(string batchId)
     {
         return await _context.StepExecutions

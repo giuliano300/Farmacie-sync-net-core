@@ -19,6 +19,7 @@ public class StepsController : ControllerBase
     private readonly BatchProcessManager _processManager;
     private readonly IEnrichedProductRepository _enrichedRepo;
     private readonly IResolvedProductRepository _resolvedRepo;
+    private readonly IBatchRepository _batchRepo;
 
 
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _runningSteps = new();
@@ -37,7 +38,8 @@ public class StepsController : ControllerBase
         ICleanupService cleanupService,
         BatchProcessManager processManager,
         IEnrichedProductRepository enrichedRepo,
-        IResolvedProductRepository resolvedRepo)
+        IResolvedProductRepository resolvedRepo,
+        IBatchRepository batchRepo)
     {
         _resolver = resolver;
         _stepRepo = stepRepo;
@@ -45,6 +47,7 @@ public class StepsController : ControllerBase
         _processManager = processManager;
         _enrichedRepo = enrichedRepo;
         _resolvedRepo = resolvedRepo;
+        _batchRepo = batchRepo;
     }
 
     [HttpGet("{batchId}")]
@@ -58,23 +61,8 @@ public class StepsController : ControllerBase
     [HttpPost("run")]
     public async Task<IActionResult> RunStep(RunStepRequest req)
     {
-        var step = await ValidateStep(req.BatchId, req.Step);
-
-        var stepId = step.Id.ToString();
-
-        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
-
-        _ = RunBackground(async () =>
-        {
-            await _stepRepo.SetRunningAsync(stepId);
-
-            var processor = _resolver.Resolve(req.Step);
-
-            var result = await processor.ExecuteAsync(req.BatchId, token);
-
-            await HandleResult(stepId, result);
-
-        }, stepId, token);
+        await ValidateStep(req.BatchId, req.Step);
+        await QueuePipelineAsync(req.BatchId, req.Step, null, cleanup: false);
 
         return Ok();
     }
@@ -83,56 +71,52 @@ public class StepsController : ControllerBase
     [HttpPost("run-pipeline")]
     public async Task<IActionResult> RunPipeline(RunStepRequest req)
     {
-        var step = await ValidateStep(req.BatchId, req.Step);
-
-        var stepId = step.Id.ToString();
-
-        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
-
-        _ = RunBackground(async () =>
-        {
-            await ExecutePipeline(req.BatchId, req.Step, token);
-
-        }, stepId, token);
+        await ValidateStep(req.BatchId, req.Step);
+        await QueuePipelineAsync(req.BatchId, req.Step, null, cleanup: false);
 
         return Ok();
     }
 
     // RETRY pipeline
     [HttpPost("retry")]
-    public IActionResult RetryStep(RetryStepRequest req)
+    public async Task<IActionResult> RetryStep(RetryStepRequest req)
     {
         StopRunningBatch(req.BatchId);
-
-        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
-
-        _ = RunBackground(async () =>
-        {
-            await _cleanupService.CleanupPipeLineAsync(req.Step, req.BatchId);
-
-            await ExecutePipeline(req.BatchId, req.Step, token);
-
-        }, null, token);
+        await QueuePipelineAsync(req.BatchId, req.Step, null, cleanup: true);
 
         return Ok();
     }
 
     [HttpPost("retryByType")]
-    public IActionResult RetryByType(RetryStepRequest req)
+    public async Task<IActionResult> RetryByType(RetryStepRequest req)
     {
         StopRunningBatch(req.BatchId);
-
-        var token = _processManager.Start(ProcessType.Batch, req.BatchId);
-
-        _ = RunBackground(async () =>
-        {
-            await _cleanupService.CleanupPipeLineAsync(req.Step, req.BatchId);
-
-            await ExecutePipelineByType(req.BatchId, req.Step, req.type!, token);
-
-        }, null, token);
+        await QueuePipelineAsync(req.BatchId, req.Step, req.type, cleanup: true);
 
         return Ok();
+    }
+
+    private async Task QueuePipelineAsync(
+        string batchId,
+        string startStep,
+        TypeRun? type,
+        bool cleanup)
+    {
+        var startIndex = Array.IndexOf(OrderedSteps, startStep);
+        if (startIndex < 0)
+            throw new Exception($"Step non valido {startStep}");
+
+        if (cleanup)
+            await _cleanupService.CleanupPipeLineAsync(startStep, batchId);
+
+        await _stepRepo.ResetNextStepsAsync(
+            batchId,
+            OrderedSteps.Skip(startIndex).ToList());
+
+        if (type.HasValue)
+            await _batchRepo.SetTypeAsync(batchId, type);
+
+        await _batchRepo.SetRunningAsync(batchId);
     }
 
     // =========================

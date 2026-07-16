@@ -53,4 +53,5 @@ public class MagentoConfig
     public int? MaxRetryAttempts { get; set; }
     public int? RetryDelayMilliseconds { get; set; }
     public int? ImagePollingStallTimeoutMinutes { get; set; }
+    public int? ImagePollingStartTimeoutMinutes { get; set; }
 }

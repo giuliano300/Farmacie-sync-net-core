@@ -80,6 +80,19 @@ public class MagentoExportStepProcessor : IStepProcessor
 
             var sku = mapped.Select(a => a.Aic).ToList();
 
+            var existingImportStatus = await _importToMagento.GetByBatchAsync(batchId);
+            var resumeImagePolling =
+                type == TypeRun.ImportImmagini &&
+                existingImportStatus?.InsertImagesStatus == OperationsStatus.Running;
+
+            if (resumeImagePolling)
+            {
+                await ResumeImagePollingAsync(mapped, exporter, batchId, token);
+                result.Success = true;
+                result.FinishedAt = DateTime.UtcNow;
+                return result;
+            }
+
             // Download Magento metadata once; the following phases reuse the same snapshot.
             var metadata = await exporter.GetMagentoMetadataAsync(batchId, token);
             var magentoSet = metadata.magentoProducts!
@@ -87,7 +100,7 @@ public class MagentoExportStepProcessor : IStepProcessor
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             // Create/update the progress document used by dashboard polling.
-               await _importToMagento.Start(batchId, mapped.Count, type!);
+            await _importToMagento.Start(batchId, mapped.Count, type!);
 
             var skus = new List<string>();
             var touchedSkus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -170,6 +183,47 @@ public class MagentoExportStepProcessor : IStepProcessor
 
         result.FinishedAt = DateTime.UtcNow;
         return result;
+    }
+
+    private async Task ResumeImagePollingAsync(
+        List<ResolvedProduct> mapped,
+        IMagentoExporter exporter,
+        string batchId,
+        CancellationToken token)
+    {
+        await exporter.WaitPollingImagesAsync(batchId, token);
+
+        var imageSkus = mapped
+            .Where(x => x.Images.Count > 0)
+            .Select(x => x.Aic)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (imageSkus.Count > 0)
+        {
+            await _importToMagento.UpdateImportStatusAsync(
+                batchId,
+                insertImagesStatus: OperationsStatus.Ended,
+                reindexStatus: OperationsStatus.Running);
+
+            await exporter.ReindexAsync(imageSkus, batchId, token);
+            await exporter.WaitReindexAsync(batchId, token);
+            await _importToMagento.UpdateImportStatusAsync(
+                batchId,
+                reindexPercent: 100,
+                reindexStatus: OperationsStatus.Ended);
+
+            await exporter.CleanIndex(token);
+            await exporter.CleanCache(token);
+        }
+
+        await _batchFinalizer.FinalizeBatchAsync(batchId);
+        await _importToMagento.UpdateImportStatusAsync(
+            batchId,
+            insertImagesStatus: OperationsStatus.Ended,
+            reindexStatus: OperationsStatus.Ended,
+            importStatus: OperationsStatus.Ended,
+            reindexPercent: 100);
     }
 
     private List<ResolvedProduct> MapProducts(List<ResolvedProduct> source)

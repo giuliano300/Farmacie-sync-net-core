@@ -42,6 +42,7 @@ public class MagentoExporter : IMagentoExporter
     private readonly int _magentoHttpTimeoutSeconds;
     private readonly int _magentoHttpRetryDelayMilliseconds;
     private readonly int _imagePollingStallTimeoutMinutes;
+    private readonly int _imagePollingStartTimeoutMinutes;
     private const int MaxParallel = 20;
     private const int MagentoProductsPageSize = 300;
     private const int MagentoProductsMaxAttempts = 3;
@@ -50,7 +51,8 @@ public class MagentoExporter : IMagentoExporter
     private const int DefaultMagentoHttpMaxAttempts = 3;
     private const int DefaultMagentoHttpTimeoutSeconds = 45;
     private const int DefaultMagentoHttpRetryDelayMilliseconds = 3000;
-    private const int DefaultImagePollingStallTimeoutMinutes = 2;
+    private const int DefaultImagePollingStallTimeoutMinutes = 10;
+    private const int DefaultImagePollingStartTimeoutMinutes = 50;
 
     public MagentoExporter(
         HttpClient http,
@@ -92,6 +94,9 @@ public class MagentoExporter : IMagentoExporter
         _imagePollingStallTimeoutMinutes = Math.Max(
             1,
             _magento.ImagePollingStallTimeoutMinutes ?? DefaultImagePollingStallTimeoutMinutes);
+        _imagePollingStartTimeoutMinutes = Math.Max(
+            1,
+            _magento.ImagePollingStartTimeoutMinutes ?? DefaultImagePollingStartTimeoutMinutes);
 
         _gridFsBucket = new GridFSBucket(database);
     }
@@ -337,6 +342,11 @@ public class MagentoExporter : IMagentoExporter
 
                 var result = DeserializeImagesImportStatus(response);
 
+                var imagesCompleted =
+                    !result.Running ||
+                    result.Percent >= 100 ||
+                    (result.Total > 0 && result.Processed >= result.Total);
+
                 // Magento può omettere "inserted" finché non ha completato la
                 // prima immagine. Un set evita inoltre doppi conteggi se la lista
                 // restituita dall'API cambia ordine tra due chiamate.
@@ -347,30 +357,38 @@ public class MagentoExporter : IMagentoExporter
 
                 if (newSkus.Count > 0)
                 {
-                    var l = new List<InventoryItem>();
-                    foreach (var s in newSkus)
+                    try
                     {
-                        var i = new InventoryItem()
+                        foreach (var skuChunk in newSkus.Chunk(100))
                         {
-                            Id = batchId,
-                            Qty = 0,
-                            Message = "Inserimento riuscito",
-                            Sku = s
-                        };
-                        l.Add(i);
+                            var items = skuChunk.Select(s => new InventoryItem
+                            {
+                                Id = batchId,
+                                Qty = 0,
+                                Message = "Inserimento riuscito",
+                                Sku = s
+                            }).ToList();
+
+                            await _exportRepo.SetStatusBulkAsync(
+                                items,
+                                ExportStatus.InsertImages);
+
+                            await _importToMagento.UpdateImportStatusAsync(
+                                batchId,
+                                totalImagesInserted: items.Count);
+
+                            processedSkus.UnionWith(skuChunk);
+                        }
                     }
-                    await _exportRepo.SetStatusBulkAsync(
-                        l,
-                        ExportStatus.InsertImages
-                    );
-
-                    // Update image import progress with newly confirmed SKUs.
-                    await _importToMagento.UpdateImportStatusAsync(batchId, totalImagesInserted: l.Count);
-
-                    // Uno SKU diventa processato soltanto dopo che entrambi gli
-                    // aggiornamenti locali sono riusciti, così verrà ritentato in
-                    // caso di errore temporaneo del database.
-                    processedSkus.UnionWith(newSkus);
+                    catch (Exception ex) when (imagesCompleted)
+                    {
+                        // Completion of the external job must not be blocked by
+                        // non-critical per-SKU history synchronization.
+                        _logger.LogError(
+                            ex,
+                            "Import immagini completato ma storico SKU non allineato. BatchId: {BatchId}",
+                            batchId);
+                    }
                 }
 
 
@@ -398,25 +416,25 @@ public class MagentoExporter : IMagentoExporter
                     }
                 }
                 else if (
-                    importProgressStarted &&
                     result.Running &&
                     DateTime.UtcNow - lastProgressAt >= TimeSpan.FromMinutes(
-                        _imagePollingStallTimeoutMinutes))
+                        importProgressStarted
+                            ? _imagePollingStallTimeoutMinutes
+                            : _imagePollingStartTimeoutMinutes))
                 {
-                    Console.WriteLine(
+                    var timeoutMinutes = importProgressStarted
+                        ? _imagePollingStallTimeoutMinutes
+                        : _imagePollingStartTimeoutMinutes;
+
+                    _logger.LogWarning(
                         $"Import immagini fermo a {result.Processed}/{result.Total} " +
-                        $"({result.Percent}%) da almeno {_imagePollingStallTimeoutMinutes} minuti. " +
+                        $"({result.Percent}%) da almeno {timeoutMinutes} minuti. " +
                         "Imposto Running=false e proseguo con il reindex.");
 
                     // Running viene forzato solo nella copia locale dello stato: il
                     // workflow Heron termina la fase e può passare al reindex.
                     result.Running = false;
                 }
-
-                var imagesCompleted =
-                    !result.Running ||
-                    result.Percent >= 100 ||
-                    (result.Total > 0 && result.Processed >= result.Total);
 
                 if (imagesCompleted)
                 {
@@ -432,7 +450,7 @@ public class MagentoExporter : IMagentoExporter
                 consecutiveErrors = 0;
 
                 await Task.Delay(
-                    2000,
+                    10000,
                     token
                 );
             }
@@ -442,11 +460,34 @@ public class MagentoExporter : IMagentoExporter
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
                 consecutiveErrors++;
 
-                // Il polling non viene mai terminato per errori temporanei. Il
-                // backoff è limitato a 30 secondi, poi il controllo riprende.
+                _logger.LogError(
+                    ex,
+                    "Errore polling immagini. BatchId: {BatchId}; Attempt consecutivo: {Attempt}",
+                    batchId,
+                    consecutiveErrors);
+
+                var timeoutMinutes = importProgressStarted
+                    ? _imagePollingStallTimeoutMinutes
+                    : _imagePollingStartTimeoutMinutes;
+
+                if (DateTime.UtcNow - lastProgressAt >= TimeSpan.FromMinutes(timeoutMinutes))
+                {
+                    _logger.LogWarning(
+                        "Polling immagini abbandonato dopo {Minutes} minuti senza avanzamento. " +
+                        "BatchId: {BatchId}. Proseguo con il reindex.",
+                        timeoutMinutes,
+                        batchId);
+
+                    await _importToMagento.UpdateImportStatusAsync(
+                        batchId,
+                        insertImagesStatus: OperationsStatus.Ended);
+                    break;
+                }
+
+                // Retry transient failures with bounded backoff until the
+                // configured no-progress timeout allows the workflow to continue.
                 var retryDelaySeconds = Math.Min(30, Math.Max(2, consecutiveErrors * 2));
                 await Task.Delay(TimeSpan.FromSeconds(retryDelaySeconds), token);
             }
@@ -1141,6 +1182,7 @@ public class MagentoExporter : IMagentoExporter
 
         var remoteFile =
             remoteFolder + "/" + Path.GetFileName(localFile);
+        var clearImageDirectories = rm.TrimEnd('/').EndsWith("/images", StringComparison.OrdinalIgnoreCase);
 
         var isSftp = await IsSftpAsync(host, token);
 
@@ -1161,28 +1203,25 @@ public class MagentoExporter : IMagentoExporter
 
             EnsureSftpDirectoryExists(sftp, remoteFolder);
 
-            try
+            var files = sftp.ListDirectory(remoteFolder);
+
+            foreach (var file in files)
             {
+                if (file.Name == "." || file.Name == "..")
+                    continue;
 
-                var files = sftp.ListDirectory(remoteFolder);
+                var fullPath = remoteFolder + "/" + file.Name;
 
-                foreach (var file in files)
+                if (file.IsDirectory)
                 {
-                    if (file.Name == "." || file.Name == "..")
-                        continue;
-
-                    var fullPath = remoteFolder + "/" + file.Name;
-
-                    if (!file.IsDirectory)
-                        sftp.DeleteFile(fullPath);
+                    if (clearImageDirectories)
+                        DeleteSftpDirectoryRecursive(sftp, fullPath);
                 }
+                else
+                    sftp.DeleteFile(fullPath);
+            }
 
-                sftp.UploadFile(fs, remoteFile, true);
-            }
-            catch(Exception e)
-            {
-                var ex = e;
-            }
+            sftp.UploadFile(fs, remoteFile, true);
 
             sftp.Disconnect();
         }
@@ -1198,6 +1237,19 @@ public class MagentoExporter : IMagentoExporter
             if (!ftp.IsConnected)
                 throw new Exception("Connessione FTP fallita");
 
+            if (clearImageDirectories)
+            {
+                ftp.CreateDirectory(remoteFolder);
+
+                foreach (var item in ftp.GetListing(remoteFolder))
+                {
+                    if (item.Type == FtpObjectType.Directory)
+                        ftp.DeleteDirectory(item.FullName, FtpListOption.Recursive);
+                    else if (item.Type == FtpObjectType.File)
+                        ftp.DeleteFile(item.FullName);
+                }
+            }
+
             ftp.UploadFile(
                 localFile,
                 remoteFile,
@@ -1206,6 +1258,26 @@ public class MagentoExporter : IMagentoExporter
 
             ftp.Disconnect();
         }
+    }
+
+    private static void DeleteSftpDirectoryRecursive(
+        Renci.SshNet.SftpClient sftp,
+        string path)
+    {
+        foreach (var item in sftp.ListDirectory(path))
+        {
+            if (item.Name == "." || item.Name == "..")
+                continue;
+
+            var childPath = path.TrimEnd('/') + "/" + item.Name;
+
+            if (item.IsDirectory)
+                DeleteSftpDirectoryRecursive(sftp, childPath);
+            else
+                sftp.DeleteFile(childPath);
+        }
+
+        sftp.DeleteDirectory(path);
     }
 
     private void EnsureSftpDirectoryExists(
