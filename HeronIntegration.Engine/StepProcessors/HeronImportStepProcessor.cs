@@ -10,6 +10,7 @@ using System.IO.Compression;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
+/// <summary>Parses the customer Heron XML and creates the raw pipeline snapshot.</summary>
 public class HeronImportStepProcessor : IStepProcessor
 {
     // Must match the StepExecution.Step value created by HeronFileWatcherWorker.

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using Newtonsoft.Json.Linq;
 
+/// <summary>Reads durable batch reports and historical dashboard projections.</summary>
 [ApiController]
 [Route("api/batches-report")]
 public class BatchReportController : ControllerBase

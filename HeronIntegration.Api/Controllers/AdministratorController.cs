@@ -5,6 +5,7 @@ using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
 
+/// <summary>Legacy administrator credential endpoint; protect it at the host boundary.</summary>
 [ApiController]
 [Route("api/administrator")]
 public class AdministratorController : ControllerBase

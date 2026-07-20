@@ -8,6 +8,10 @@ using HeronIntegration.Shared.Singletons;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 
+/// <summary>
+/// Exposes Farmadati import history and manual imports. The full import is long
+/// running and uses the API process-local job manager for cancellation/exclusion.
+/// </summary>
 [ApiController]
 [Route("api/farmadati-updates")]
 public class FarmadatiUpdatesController : ControllerBase
@@ -45,6 +49,8 @@ public class FarmadatiUpdatesController : ControllerBase
     }
 
     [HttpPost("import-full")]
+    // This Task.Run is process-local: an API recycle interrupts the import, and the
+    // Engine's weekly job manager cannot see this singleton instance.
     public IActionResult ImportFull(ImportType importType = ImportType.Full)
     {
         if (_jobManager.IsRunning)

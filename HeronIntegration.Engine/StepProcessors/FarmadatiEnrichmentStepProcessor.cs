@@ -8,6 +8,7 @@ using HeronIntegration.Shared.Models;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
+/// <summary>Enriches raw products through caches and Farmadati providers.</summary>
 public class FarmadatiEnrichmentStepProcessor : IStepProcessor
 {
     // Must match the Farmadati step generated for each batch.

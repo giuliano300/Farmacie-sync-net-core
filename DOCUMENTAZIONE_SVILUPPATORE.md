@@ -1,209 +1,293 @@
-# Documentazione sviluppatore
+# Heron Integration System - documentazione sviluppatore
 
-## Obiettivo
+## 1. Scopo e architettura
 
-`HeronIntegrationSystem` integra file Heron, Farmadati, stock fornitori e Magento.
-La solution e pensata come due host separati che condividono la logica applicativa:
+Heron Integration System importa il catalogo Heron, arricchisce i prodotti tramite
+Farmadati, risolve disponibilità e prezzi dei fornitori e sincronizza Magento.
 
-- `HeronIntegration.Api`: espone controller HTTP per dashboard, batch, mapping e operazioni amministrative.
-- `HeronIntegration.Engine`: esegue worker background per intake file, orchestrazione batch e import stock fornitori.
-- `HeronIntegration.Shared`: contiene entita, DTO, enum e singleton condivisi.
+La solution contiene tre progetti:
 
-## Flusso batch
+| Progetto | Responsabilità |
+| --- | --- |
+| `HeronIntegration.Api` | API HTTP amministrative, dashboard e comandi manuali |
+| `HeronIntegration.Engine` | Worker, pipeline, integrazioni esterne e persistenza |
+| `HeronIntegration.Shared` | Entità MongoDB, DTO, enum e singleton condivisi |
 
-1. `HeronFileWatcherWorker` controlla `Heron:IncomingRoot`.
-2. Per ogni XML in una cartella customer crea un batch `Running`.
-3. Crea gli step standard: `HeronImport`, `Farmadati`, `Suppliers`, `Magento`.
-4. Sposta il file in `Heron:WorkingRoot`.
-5. `BatchOrchestratorWorker` prende i batch running e avanza uno step alla volta.
-6. Quando non ci sono step pending, esegue cron Magento, salva il report e chiude il batch.
+API ed Engine sono due processi separati. Condividono database e registrazioni DI,
+ma non memoria o singleton. I job durevoli devono quindi essere gestiti dall'Engine;
+un `Task.Run` avviato dall'API vive soltanto quanto il processo API.
 
-## Requisiti locali
+```text
+Frontend / operatore
+        |
+        v
+HeronIntegration.Api -------> MongoDB <------- HeronIntegration.Engine
+                                      |          |-- batch pipeline
+                                      |          |-- supplier FTP
+                                      |          |-- Farmadati SOAP
+                                      |          `-- Magento REST/SSH
+                                      `-------> GridFS (immagini Farmadati)
+```
 
-- .NET SDK 9.x.
-- MongoDB locale o raggiungibile via connection string.
-- Accessi esterni solo per test reali verso Farmadati, FTP fornitori e Magento.
+## 2. Avvio locale
 
-Comandi principali:
+Requisiti:
+
+- .NET SDK 9.x;
+- MongoDB raggiungibile;
+- credenziali valide per i test reali verso Farmadati, FTP e Magento.
 
 ```powershell
-dotnet --version
+dotnet restore HeronIntegrationSystem.sln
 dotnet build HeronIntegrationSystem.sln
 dotnet run --project HeronIntegration.Api\HeronIntegration.Api.csproj
 dotnet run --project HeronIntegration.Engine\HeronIntegration.Engine.csproj
 ```
 
-## Configurazione
+L'Engine può essere installato come servizio Windows con nome
+`Heron Integration Engine`.
+
+## 3. Configurazione
 
 File principali:
 
-- `HeronIntegration.Api/appsettings.json`
-- `HeronIntegration.Api/appsettings.Development.json`
-- `HeronIntegration.Engine/appsettings.json`
+- `HeronIntegration.Api/appsettings.json`;
+- `HeronIntegration.Api/appsettings.Development.json`;
+- `HeronIntegration.Engine/appsettings.json`.
 
-Non versionare segreti reali. Usare variabili d'ambiente o User Secrets.
+Le impostazioni possono essere sovrascritte con variabili d'ambiente usando `__`
+come separatore:
 
 ```powershell
 $env:Mongo__ConnectionString = "mongodb://localhost:27017"
 $env:Mongo__Database = "heron_integration"
 $env:Farmadati__Username = "..."
 $env:Farmadati__Password = "..."
-$env:SupplierFtp__SOFARMA__Host = "..."
-$env:SupplierFtp__SOFARMA__Username = "..."
-$env:SupplierFtp__SOFARMA__Password = "..."
+$env:HERON_LOG_DIR = "D:\Heron\logs"
 ```
 
-Chiavi importanti:
+Chiavi principali:
 
-- `Mongo:ConnectionString`: connection string MongoDB.
-- `Mongo:Database`: database applicativo.
-- `Heron:IncomingRoot`: cartella monitorata dal watcher.
-- `Heron:WorkingRoot`: cartella di lavoro dopo presa in carico.
-- `Farmadati:Endpoint`: endpoint SOAP Farmadati.
-- `Farmadati:Username` e `Farmadati:Password`: credenziali Farmadati.
-- `SupplierFtp:{CODE}:Host`, `Username`, `Password`, `RemoteFolder`: FTP dei client supplier dedicati.
-- `Suppliers`: lista usata da `SupplierFileImporterWorker` per import periodico file stock.
+| Chiave | Utilizzo |
+| --- | --- |
+| `Mongo:ConnectionString` | Connessione MongoDB |
+| `Mongo:Database` | Database applicativo |
+| `Heron:IncomingRoot` | Directory di ingresso del watcher legacy |
+| `Heron:WorkingRoot` | Directory dei file presi in carico |
+| `Farmadati:Username`, `Password` | Credenziali web service |
+| `Farmadati:RootPath` | Directory temporanea dell'import completo |
+| `Farmadati:ImagesEndpoint` | Download documenti e immagini |
+| `HeronLogging:LogDirectory` | Directory log, superata da `HERON_LOG_DIR` |
 
-## Dependency injection
+Le credenziali dei fornitori attivi sono salvate nella collection `suppliers`.
+Non inserire segreti reali nei file versionati; usare User Secrets, variabili
+d'ambiente o il secret store dell'ambiente di deploy.
 
-Le registrazioni condivise stanno in:
+## 4. Dependency injection e lifetime
 
-`HeronIntegration.Engine/DependencyInjection/HeronIntegrationServiceCollectionExtensions.cs`
+`AddHeronIntegrationCore` registra il nucleo condiviso da API ed Engine:
 
-Regole:
+- `IMongoClient`, `IMongoDatabase` e repository;
+- processor dei quattro step;
+- client Farmadati e Magento;
+- parser e servizi fornitori;
+- manager singleton per cancellazione batch e Farmadati;
+- servizio di rollback compensativo per MongoDB standalone.
 
-- servizi comuni ad API e worker: `AddHeronIntegrationCore`.
-- hosted service: solo in `HeronIntegration.Engine/Program.cs`.
-- controller, CORS, middleware HTTP e logging web: solo in `HeronIntegration.Api/Program.cs`.
-- segreti: mai nei costruttori e mai hardcoded, solo configurazione.
+I repository sono scoped. Un worker singleton deve creare uno scope con
+`IServiceScopeFactory` per ogni ciclo o esecuzione e non deve conservare repository
+tra due cicli.
 
-## Worker
+Gli hosted service sono registrati esclusivamente in
+`HeronIntegration.Engine/Program.cs`.
 
-### BatchOrchestratorWorker
+## 5. Ciclo di vita di un batch
 
-Scopo: avanzare i batch running.
+Il documento principale è `batch_execution`; il suo `_id` è il `BatchId` usato
+dalle collection di pipeline.
 
-Comportamento:
+Un batch può essere creato manualmente da `POST /api/admin/batches/create` oppure
+automaticamente da `CustomerCronBatchWorker`, in base al campo `Cron` dei customer
+attivi. Il worker evita duplicati tramite `TriggerReason` e non crea un nuovo batch
+se lo stesso customer ne ha già uno running.
 
-- poll ogni 10 secondi;
-- crea uno scope DI per ciclo;
-- recupera batch running;
-- esegue il prossimo step pending;
-- finalizza il batch quando non ci sono step pending;
-- logga errori per batch senza fermare il worker;
-- esce pulito su cancellazione host.
+Gli step standard, in ordine, sono:
 
-Diagnosi:
+1. `HeronImport`: legge l'XML e popola `raw_product`;
+2. `Farmadati`: arricchisce e popola `enriched_product`;
+3. `Suppliers`: risolve fornitore, disponibilità e prezzo in `resolved_product`;
+4. `Magento`: inserisce/aggiorna prodotti, quantità e immagini.
 
-- cercare log `Batch Orchestrator started`;
-- se Mongo non risponde, il worker logga errore e riprova al ciclo successivo;
-- se uno step fallisce, controllare `step_execution.ErrorMessage`.
+`BatchOrchestratorWorker` interroga MongoDB ogni 10 secondi. Per ogni batch running
+riprende uno step rimasto `Running` oppure esegue il successivo `Pending`. MongoDB
+funge quindi da coda durevole e conserva lo stato dopo un riavvio dell'Engine.
 
-### HeronFileWatcherWorker
+Quando non rimangono step, l'orchestrator esegue il cron Magento, crea il report,
+chiude il batch e rimuove i dati intermedi. Gli errori dello step sono salvati in
+`step_execution.ErrorMessage`.
 
-Scopo: creare batch da file XML Heron.
+`HeronFileWatcherWorker` esiste nel codice ma non è registrato nell'host corrente:
+non crea batch finché non viene aggiunto esplicitamente a `Program.cs`.
 
-Comportamento:
+## 6. Worker e pianificazioni
 
-- valida `Heron:IncomingRoot`;
-- legge sottocartelle per customer;
-- processa file `*.xml`;
-- crea batch e step standard;
-- sposta il file in `Heron:WorkingRoot`;
-- logga errori per singolo file senza fermare la scansione.
+Gli orari sono calcolati nel fuso locale della macchina che esegue l'Engine.
 
-Struttura attesa:
+| Worker | Frequenza | Funzione |
+| --- | --- | --- |
+| `BatchOrchestratorWorker` | ogni 10 secondi | Avanza le pipeline running |
+| `CustomerCronBatchWorker` | ogni 30 secondi | Crea batch secondo `Customer.Cron` |
+| `NightBatchFinalizerService` | ogni giorno 00:00 | Finalizza batch aperti iniziati prima del giorno corrente |
+| `BatchRetentionWorker` | ogni giorno 00:00 | Elimina batch terminati da oltre 7 giorni |
+| `SupplierFileImporterWorker` | ogni giorno 01:00 | Sincronizza tutti i fornitori attivi |
+| `WeeklyFarmadatiImportWorker` | domenica 22:00 | Esegue l'import Farmadati `Full` (`importType=1`) |
 
-```text
-IncomingRoot/
-  CUSTOMER_ID/
-    file.xml
-WorkingRoot/
-  CUSTOMER_ID/
-    file.xml
-```
+La sincronizzazione fornitori replica il flusso di
+`GET /api/admin/suppliers/sync`: download dell'ultimo file FTP, parser specifico,
+sostituzione dello snapshot `supplier_stock` e aggiornamento di `LastUpdate`.
 
-### SupplierFileImporterWorker
+## 7. Rollback su MongoDB standalone
 
-Scopo: aggiornare periodicamente gli stock fornitori.
+L'installazione corrente è standalone e non supporta transazioni multi-documento.
+`MongoCompensationService` implementa quindi un rollback compensativo mediante
+collection temporanee `_rollback_*`:
 
-Comportamento:
+- retention: salva soltanto i documenti dei batch da eliminare;
+- supplier: salva lo stock del singolo fornitore prima della sostituzione;
+- Farmadati: salva `farmadati_cache`, `fs.files` e `fs.chunks`.
 
-- poll ogni 30 minuti;
-- legge la sezione `Suppliers`;
-- scarica il file FTP con FluentFTP;
-- parse CSV `AIC;PRICE;AVAILABILITY`;
-- sostituisce lo snapshot stock del supplier;
-- scarta righe non valide con warning.
+Se l'operazione fallisce, i documenti correnti interessati vengono eliminati e il
+backup viene reinserito per `_id`. Al termine le collection temporanee vengono
+rimosse. Errore originale, avvio rollback, esito del ripristino ed eventuale errore
+di cleanup sono registrati nei log.
 
-### SupplierStockProcessor
+Considerazioni operative:
 
-Scopo: download/import manuale o orchestrato per supplier attivi da Mongo.
+- l'import Farmadati richiede spazio libero sufficiente a duplicare cache e GridFS;
+- un arresto forzato del processo può lasciare una collection `_rollback_*`, da
+  analizzare prima della rimozione manuale;
+- chiamate già eseguite su FTP, SOAP, Magento o SSH non sono annullabili da MongoDB;
+- i file temporanei Farmadati vengono rimossi dopo il rollback;
+- non avviare contemporaneamente import Farmadati da API ed Engine: i singleton che
+  rilevano un job running non sono condivisi tra i due processi.
 
-Comportamento:
+## 8. Persistenza MongoDB
 
-- usa configurazioni supplier salvate a database;
-- scarica il file FTP piu recente;
-- se il download fallisce, prova a usare l'ultimo file locale;
-- importa il file tramite parser specifico.
+`MongoContext` è il catalogo centralizzato delle collection.
 
-## Verifica worker
+| Collection | Contenuto / relazione |
+| --- | --- |
+| `batch_execution` | Testata batch; relazione tramite `_id` |
+| `step_execution` | Stato degli step; `BatchId` ObjectId |
+| `export_execution` | Stato export per AIC; `BatchId` ObjectId |
+| `raw_product` | Prodotti letti da Heron; `BatchId` ObjectId |
+| `enriched_product` | Prodotti arricchiti; `BatchId` ObjectId |
+| `resolved_product` | Prodotti risolti per export; `BatchId` ObjectId |
+| `import_to_magento_status` | Contatori Magento; `BatchId` stringa |
+| `batch_report` | Report finale; `BatchId` stringa |
+| `customers` | Customer, cron e configurazione Magento |
+| `suppliers` | Configurazioni e credenziali FTP fornitori |
+| `supplier_stock` | Snapshot disponibilità/prezzo per fornitore |
+| `farmadati_cache` | Catalogo Farmadati consolidato |
+| `farmadati_updates` | Storico e progresso import Farmadati |
+| `fs.files`, `fs.chunks` | Immagini Farmadati in GridFS |
+| mapping/cache | Mapping categorie/produttori e cache gestionali |
 
-Build:
+Attenzione alla doppia rappresentazione del `BatchId`: le collection di pipeline
+usano `ObjectId`, mentre report e stato Magento usano stringhe esadecimali.
+
+## 9. API
+
+L'API usa controller attribute-routed. Gruppi principali:
+
+| Prefisso | Responsabilità |
+| --- | --- |
+| `/api/admin/batches` | Creazione, avvio, restart, stato e finalizzazione batch |
+| `/api/admin/steps` | Esecuzione e retry step/pipeline |
+| `/api/batches-report` | Report, storico e batch odierni |
+| `/api/dashboard` | Stato aggregato e reindex |
+| `/api/admin/customers` | CRUD customer e login |
+| `/api/admin/suppliers` | CRUD e sincronizzazione singolo supplier |
+| `/api/admin/supplier-stock` | Download/import/run singolo o massivo |
+| `/api/farmadati-updates` | Storico e import completo Farmadati |
+| `/api/category-mappings` | Mapping categorie |
+| `/api/Producer-mappings` | Mapping produttori |
+| `/api/product-to-exclude` | Esclusioni prodotto |
+| `/api/admin/export` | Retry export per AIC o batch |
+| `/api/Magento` | Operazioni Magento diagnostiche/amministrative |
+| `/api/test/farmadati` | Endpoint diagnostici Farmadati |
+
+Gli endpoint con effetti collaterali devono essere trattati come comandi anche dove
+il codice storico usa `GET`.
+
+### Sicurezza
+
+Lo stato corrente richiede protezioni infrastrutturali:
+
+- CORS è aperto a qualsiasi origine, header e metodo;
+- non è configurato middleware standard di autenticazione/autorizzazione;
+- diversi endpoint amministrativi espongono operazioni distruttive o costose;
+- non è configurato rate limiting.
+
+Prima dell'esposizione pubblica aggiungere autenticazione, policy admin, CORS
+ristretto, rate limiting e conversione dei `GET` con side effect in `POST`/`DELETE`.
+
+## 10. Logging
+
+API ed Engine usano Serilog con file giornalieri condivisi:
+
+- `application-YYYYMMDD.txt`: log applicativi generali;
+- `farmadati-import-YYYYMMDD.txt`: import Farmadati nell'API;
+- `magento-exporter-YYYYMMDD.txt`: operazioni Magento;
+- `serilog-selflog.txt`: problemi interni di Serilog.
+
+La directory è risolta in questo ordine:
+
+1. variabile `HERON_LOG_DIR`;
+2. `HeronLogging:LogDirectory`;
+3. `C:\inetpub\wwwroot\logs`;
+4. fallback `logs` accanto all'eseguibile.
+
+Per investigare un batch cercare il suo ObjectId in application e Magento log, poi
+controllare `batch_execution`, `step_execution`, `import_to_magento_status` e
+`batch_report`.
+
+## 11. Diagnostica e smoke test
+
+### Pipeline batch
+
+1. Avviare MongoDB, API ed Engine.
+2. Creare o scegliere un customer attivo con Magento e `HeronFolder` validi.
+3. Creare il batch da API oppure attendere il cron customer.
+4. Verificare `batch_execution` e i quattro record `step_execution`.
+5. Seguire il `BatchId` nei log e nelle collection intermedie.
+6. A chiusura verificare `batch_report` e lo stato `Closed`.
+
+### Supplier
+
+1. Verificare `Active=true`, credenziali FTP e parser per il codice.
+2. Eseguire `/api/admin/suppliers/sync?code=...`.
+3. Controllare `supplier_stock` e `suppliers.LastUpdate`.
+4. Per testare il rollback provocare un errore di scrittura in ambiente non
+   produttivo e verificare log e assenza di collection `_rollback_*` residue.
+
+### Farmadati
+
+1. Verificare credenziali, spazio disco e raggiungibilità SOAP.
+2. Eseguire `POST /api/farmadati-updates/import-full?importType=1` soltanto se il
+   worker settimanale non è attivo.
+3. Controllare `farmadati_updates`, log dedicato, cache e GridFS.
+
+## 12. Regole per le modifiche
+
+- Non registrare hosted service nell'API.
+- Non iniettare servizi scoped direttamente in un `BackgroundService`; creare scope.
+- Propagare `CancellationToken` nelle operazioni lunghe.
+- Isolare gli errori per batch o supplier per non fermare l'intero worker.
+- Aggiornare questa guida quando cambiano orari, collection o ordine degli step.
+- Verificare sempre con:
 
 ```powershell
-dotnet build HeronIntegrationSystem.sln
+dotnet build HeronIntegrationSystem.sln --no-restore
+git diff --check
 ```
-
-Avvio Engine:
-
-```powershell
-dotnet run --project HeronIntegration.Engine\HeronIntegration.Engine.csproj
-```
-
-Controlli attesi:
-
-- il processo resta attivo;
-- console mostra avvio dei worker;
-- se `Heron:IncomingRoot` non esiste, compare warning ma il processo non termina;
-- se Mongo e spento, l'orchestrator logga errore e ritenta;
-- se `Suppliers` e vuoto, il supplier importer logga debug e non fallisce.
-
-Smoke test manuale Heron:
-
-1. Avviare MongoDB.
-2. Creare cartella `Heron:IncomingRoot\CUSTOMER_ID`.
-3. Inserire un XML Heron valido.
-4. Avviare `HeronIntegration.Engine`.
-5. Verificare creazione documenti in `batch_execution` e `step_execution`.
-6. Verificare spostamento file in `Heron:WorkingRoot\CUSTOMER_ID`.
-
-## API
-
-I controller sono in `HeronIntegration.Api/Controllers`.
-
-Attenzione prima di esposizione pubblica:
-
-- aggiungere autenticazione;
-- aggiungere autorizzazioni per endpoint admin;
-- restringere CORS;
-- preferire `POST` per operazioni con effetti collaterali;
-- aggiungere rate limiting su import/export.
-
-## Persistenza
-
-`MongoContext` centralizza l'accesso alle collection.
-
-Collection principali:
-
-- `batch_execution`
-- `step_execution`
-- `export_execution`
-- `raw_product`
-- `enriched_product`
-- `resolved_product`
-- `supplier_stock`
-- `customers`
-- `farmadati_cache`
-- `batch_report`
-

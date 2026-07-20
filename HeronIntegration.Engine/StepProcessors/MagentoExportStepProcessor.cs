@@ -6,6 +6,7 @@ using HeronIntegration.Shared.Enums;
 using HeronIntegration.Shared.Models;
 using System.Collections.Concurrent;
 
+/// <summary>Coordinates product, stock, image and reindex operations on Magento.</summary>
 public class MagentoExportStepProcessor : IStepProcessor
 {
     // Must match the Magento step generated for each batch.

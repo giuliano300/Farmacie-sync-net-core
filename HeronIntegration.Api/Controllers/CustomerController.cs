@@ -6,6 +6,10 @@ using HeronIntegration.Shared.Models;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 
+/// <summary>
+/// Manages customers, their schedules, Heron folders and Magento configuration.
+/// Customer cron values are consumed by CustomerCronBatchWorker in the Engine.
+/// </summary>
 [ApiController]
 [Route("api/admin/customers")]
 public class CustomersController : ControllerBase

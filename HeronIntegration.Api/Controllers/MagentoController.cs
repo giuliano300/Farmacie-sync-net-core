@@ -7,6 +7,10 @@ using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using System.Collections.Concurrent;
 
+/// <summary>
+/// Low-level Magento administrative and diagnostic operations. Several legacy GET
+/// endpoints have side effects and must not be exposed without admin authorization.
+/// </summary>
 [ApiController]
 [Route("api/Magento")]
 public class MagentoController : ControllerBase

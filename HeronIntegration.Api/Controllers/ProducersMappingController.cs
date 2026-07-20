@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 
 namespace HeronIntegration.Engine.Api.Controllers;
 
+/// <summary>Manages mappings between management-system and Magento producers.</summary>
 [ApiController]
 [Route("api/Producer-mappings")]
 public class ProducerMappingsController : ControllerBase

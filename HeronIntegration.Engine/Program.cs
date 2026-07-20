@@ -55,14 +55,15 @@ builder.Logging.AddSerilog(Log.Logger, dispose: true);
 // Registra repository, client esterni, processor e singleton condivisi con l'API.
 builder.Services.AddHeronIntegrationCore(builder.Configuration);
 
-// Hosted services are intentionally registered only in the Worker host.
-// The API can reuse processors/repositories without starting background loops.
-// Customer cron creates automatic batches; supplier cron refreshes stocks at midnight.
-// The orchestrator executes running batches.
+// Hosted services are intentionally registered only in this process. MongoDB is the
+// durable hand-off between API commands and Engine execution, so an API recycle does
+// not interrupt a queued batch.
 builder.Services.AddHostedService<BatchOrchestratorWorker>();
 builder.Services.AddHostedService<CustomerCronBatchWorker>();
 builder.Services.AddHostedService<SupplierFileImporterWorker>();
 builder.Services.AddHostedService<NightBatchFinalizerService>();
+builder.Services.AddHostedService<BatchRetentionWorker>();
+builder.Services.AddHostedService<WeeklyFarmadatiImportWorker>();
 
 // Avvio long-running: i worker restano attivi fino allo stop del processo/servizio.
 var host = builder.Build();

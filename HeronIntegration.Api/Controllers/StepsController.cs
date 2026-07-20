@@ -9,6 +9,10 @@ using System.Collections.Concurrent;
 
 namespace HeronIntegration.Admin.Api.Controllers;
 
+/// <summary>
+/// Controls durable pipeline state. Endpoints reset MongoDB step state and mark the
+/// batch running; BatchOrchestratorWorker performs the actual execution.
+/// </summary>
 [ApiController]
 [Route("api/admin/steps")]
 public class StepsController : ControllerBase
@@ -57,7 +61,7 @@ public class StepsController : ControllerBase
         return Ok(steps);
     }
 
-    // RUN singolo step
+    // Both run commands currently queue the durable pipeline from the selected step.
     [HttpPost("run")]
     public async Task<IActionResult> RunStep(RunStepRequest req)
     {

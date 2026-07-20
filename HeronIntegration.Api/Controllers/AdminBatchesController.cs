@@ -8,6 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using SharpCompress.Common;
 
+/// <summary>
+/// Administrative batch commands. Creation persists a durable batch and its four
+/// steps; the Engine, not the HTTP request, performs the pipeline asynchronously.
+/// </summary>
 [ApiController]
 [Route("api/admin/batches")]
 public class BatchController : ControllerBase
@@ -56,6 +60,7 @@ public class BatchController : ControllerBase
         => Ok(await _stepRepo.GetByBatchAsync(batchId));
 
     [HttpPost("create")]
+    /// <summary>Creates a running batch backed by the customer's Heron XML.</summary>
     public async Task<ActionResult> Create(string customerId, TypeRun? type = null)
     {
         try
@@ -189,6 +194,8 @@ public class BatchController : ControllerBase
     }
 
     [HttpGet("finalize-batch")]
+    // Legacy command with side effects exposed as GET; keep it admin-only and migrate
+    // it to POST when API compatibility permits.
     public async Task<bool> Finalize(DateTime? y = null)
     {
         try

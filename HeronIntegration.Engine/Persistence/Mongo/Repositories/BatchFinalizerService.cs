@@ -7,6 +7,10 @@ using System.Threading.Tasks;
 
 namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
 {
+    /// <summary>
+    /// Converts transient export details into the durable batch report, closes the
+    /// batch, removes pipeline data and stops any remaining Magento-side import.
+    /// </summary>
     public class BatchFinalizerService: IBatchFinalizerService
     {
         private readonly IRawProductRepository _rawRepo;
@@ -41,6 +45,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
 
         public async Task FinalizeBatchAsync(string batchId)
         {
+            // Build report inputs before deleting export and intermediate documents.
             var report = await _exportRepo.BuildBatchReportAsync(batchId);
 
             var batchExecutions = await _exportRepo.GetByBatchAsync(batchId);

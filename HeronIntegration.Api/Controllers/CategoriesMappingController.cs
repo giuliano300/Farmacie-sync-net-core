@@ -8,6 +8,7 @@ using System.Text.Json;
 
 namespace HeronIntegration.Engine.Api.Controllers;
 
+/// <summary>Manages mappings between management-system and Magento categories.</summary>
 [ApiController]
 [Route("api/category-mappings")]
 public class CategoryMappingsController : ControllerBase

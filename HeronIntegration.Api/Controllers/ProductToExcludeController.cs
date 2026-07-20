@@ -8,6 +8,7 @@ using System.Text.Json;
 
 namespace HeronIntegration.Engine.Api.Controllers;
 
+/// <summary>Manages products excluded from the Heron-to-Magento pipeline.</summary>
 [ApiController]
 [Route("api/product-to-exclude")]
 public class ProductToExcludeController : ControllerBase

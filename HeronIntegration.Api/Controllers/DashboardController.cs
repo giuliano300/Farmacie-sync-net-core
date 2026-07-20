@@ -14,6 +14,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using static System.Net.WebRequestMethods;
 
+/// <summary>Builds aggregated operational views from batch, step and Magento state.</summary>
 [ApiController]
 [Route("api/dashboard")]
 public class DashboardController : ControllerBase

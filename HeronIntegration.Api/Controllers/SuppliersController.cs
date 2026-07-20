@@ -3,6 +3,10 @@ using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 
+/// <summary>
+/// Manages supplier configuration and exposes the single-supplier synchronization
+/// flow also used by the scheduled Engine worker.
+/// </summary>
 [ApiController]
 [Route("api/admin/suppliers")]
 public class SuppliersController : ControllerBase
@@ -29,6 +33,7 @@ public class SuppliersController : ControllerBase
         => Ok(await _repo.GetByCode(code));
 
     [HttpGet("sync")]
+    // Legacy GET with side effects: downloads a file and replaces supplier_stock.
     public async Task<bool> sync(string code)
     {
         try

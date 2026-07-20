@@ -5,6 +5,8 @@ using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// The API is intentionally a thin HTTP host: domain services and repositories are
+// shared with the Engine, while long-running hosted workers live only in the Engine.
 builder.Services.AddControllers();
 builder.Services.AddHeronIntegrationCore(builder.Configuration);
 

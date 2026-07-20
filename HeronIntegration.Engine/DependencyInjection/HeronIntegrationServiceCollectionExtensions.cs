@@ -65,6 +65,7 @@ public static class HeronIntegrationServiceCollectionExtensions
         });
 
         services.AddScoped<MongoContext>();
+        services.AddSingleton<MongoCompensationService>();
 
         return services;
     }

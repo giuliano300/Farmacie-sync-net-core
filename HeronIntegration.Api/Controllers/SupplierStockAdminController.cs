@@ -8,6 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 using MongoDB.Bson;
 using SharpCompress.Common;
 
+/// <summary>
+/// Manual supplier stock commands. `run` combines FTP download and snapshot import;
+/// `*-all` operates only on suppliers marked active in MongoDB.
+/// </summary>
 [ApiController]
 [Route("api/admin/supplier-stock")]
 public class SupplierStockAdminController : ControllerBase

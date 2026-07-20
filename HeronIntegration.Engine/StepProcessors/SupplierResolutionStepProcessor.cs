@@ -7,6 +7,7 @@ using MongoDB.Bson;
 
 namespace HeronIntegration.Engine.StepProcessors;
 
+/// <summary>Chooses stock and commercial data used by the Magento export.</summary>
 public class SupplierResolutionStepProcessor : IStepProcessor
 {
     // Must match the supplier resolution step generated for each batch.

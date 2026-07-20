@@ -12,6 +12,10 @@ using System.ServiceModel.Channels;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+/// <summary>
+/// Diagnostic Farmadati endpoints for dataset inspection and targeted tests. These
+/// operations can call external services and should be disabled outside trusted use.
+/// </summary>
 [ApiController]
 [Route("api/test/farmadati")]
 public class FarmadatiTestController : ControllerBase

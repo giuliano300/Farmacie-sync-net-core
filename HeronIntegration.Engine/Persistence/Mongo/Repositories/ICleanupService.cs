@@ -10,6 +10,7 @@ namespace HeronIntegration.Engine.Persistence.Mongo.Repositories
     public interface ICleanupService
     {
         Task CleanupBatchAsync(string batchId);
+        Task<int> CleanupExpiredBatchesAsync(DateTime cutoffUtc, CancellationToken cancellationToken = default);
         Task CleanupPipeLineAsync(string step, string batchId);
 
         Task updateExportExecution(string batchId, ExportStatus status = ExportStatus.Pending);

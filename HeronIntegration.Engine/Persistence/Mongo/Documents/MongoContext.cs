@@ -4,6 +4,10 @@ using MongoDB.Driver;
 
 namespace HeronIntegration.Engine.Persistence.Mongo;
 
+/// <summary>
+/// Central catalog of application collections. Keep collection names here so API,
+/// workers and rollback logic use the same physical MongoDB schema.
+/// </summary>
 public class MongoContext
 {
     private readonly IMongoDatabase _database;
@@ -12,6 +16,8 @@ public class MongoContext
     {
         _database = database;
     }
+
+    public IMongoDatabase Database => _database;
 
     public IMongoCollection<BatchExecution> BatchExecutions =>
         _database.GetCollection<BatchExecution>("batch_execution");

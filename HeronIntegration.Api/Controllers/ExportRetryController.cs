@@ -1,6 +1,7 @@
 ﻿using HeronIntegration.Engine.Persistence.Mongo.Repositories;
 using Microsoft.AspNetCore.Mvc;
 
+/// <summary>Resets failed export state so the Engine can retry one AIC or a batch.</summary>
 [ApiController]
 [Route("api/admin/export")]
 public class ExportRetryController : ControllerBase
@@ -12,7 +13,7 @@ public class ExportRetryController : ControllerBase
         _exportRepo = exportRepo;
     }
 
-    // retry singolo prodotto
+    // Reset only: execution remains the responsibility of the Engine pipeline.
     [HttpPost("{batchId}/retry/{aic}")]
     public async Task<IActionResult> RetrySingle(string batchId, string aic)
     {
